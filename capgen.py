@@ -176,10 +176,12 @@ def param_init_fflayer(options, params, prefix='ff', nin=None, nout=None):
 
     return params
 
+
 def fflayer(tparams, state_below, options, prefix='rconv', activ='lambda x: tensor.tanh(x)', **kwargs):
     return eval(activ)(tensor.dot(state_below, tparams[_p(prefix,'W')])+tparams[_p(prefix,'b')])
 
 # LSTM layer
+
 def param_init_lstm(options, params, prefix='lstm', nin=None, dim=None):
     if nin is None:
         nin = options['dim_proj']
@@ -206,6 +208,7 @@ def param_init_lstm(options, params, prefix='lstm', nin=None, dim=None):
     return params
 
 # This function implements the lstm fprop
+
 
 def lstm_layer(tparams, state_below, options, prefix='lstm', mask=None, **kwargs):
     nsteps = state_below.shape[0]
@@ -260,6 +263,7 @@ def lstm_layer(tparams, state_below, options, prefix='lstm', mask=None, **kwargs
     return rval
 
 # Conditional LSTM layer with Attention
+
 def param_init_lstm_cond(options, params, prefix='lstm_cond', nin=None, dim=None, dimctx=None):
     if nin is None:
         nin = options['dim']
@@ -321,6 +325,7 @@ def param_init_lstm_cond(options, params, prefix='lstm_cond', nin=None, dim=None
         params[_p(prefix, 'b_sel')] = b_sel
 
     return params
+
 
 def lstm_cond_layer(tparams, state_below, options, prefix='lstm',
                     mask=None, context=None, one_step=False,
@@ -520,6 +525,7 @@ def lstm_cond_layer(tparams, state_below, options, prefix='lstm',
 
 # parameter initialization
 # [roughly in the same order as presented in section 3.1.2]
+
 def init_params(options):
     params = OrderedDict()
     # embedding: [matrix E in paper]
@@ -717,6 +723,7 @@ def build_model(tparams, options, sampling=True):
     return trng, use_noise, [x, mask, ctx], alphas, alpha_sample, cost, opt_outs
 
 # build a sampler
+
 def build_sampler(tparams, options, use_noise, trng, sampling=True):
     """ Builds a sampler used for generating from the model
     Parameters
@@ -829,6 +836,7 @@ def build_sampler(tparams, options, use_noise, trng, sampling=True):
     return f_init, f_next
 
 # generate sample
+
 def gen_sample(tparams, f_init, f_next, ctx0, options,
                trng=None, k=1, maxlen=30, stochastic=False):
     """Generate captions with beam search.
@@ -1040,6 +1048,7 @@ def pred_probs(f_log_probs, options, worddict, prepare_data, data, iterator, ver
             print '%d/%d samples computed'%(n_done,n_samples)
 
     return probs
+
 
 def validate_options(options):
     # Put friendly reminders here

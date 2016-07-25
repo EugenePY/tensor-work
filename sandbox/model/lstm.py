@@ -8,53 +8,14 @@ An demostration about simple model using pylearn2
 import functools
 from pylearn2.models.model import Model
 
-# from pylearn2.utils import wraps
+from pylearn2.utils import wraps
 from pylearn2.utils import shardedX
 from pylearn2.blocks import Block, StackedBlocks
 
 import theano
-import theano.tensor as tensor
+import theano.tensor as T
 from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams
 import numpy
-
-def options(dim_word=100,  # word vector dimensionality
-          ctx_dim=512,  # context vector dimensionality
-          dim=1000,  # the number of LSTM units
-          attn_type='stochastic',  # [see section 4 from paper]
-          n_layers_att=1,  # number of layers used to compute the attention weights
-          n_layers_out=1,  # number of layers used to compute logit
-          n_layers_lstm=1,  # number of lstm layers
-          n_layers_init=1,  # number of layers to initialize LSTM at time 0
-          lstm_encoder=False,  # if True, run bidirectional LSTM on input units
-          prev2out=False,  # Feed previous word into logit
-          ctx2out=False,  # Feed attention weighted ctx into logit
-          alpha_entropy_c=0.002,  # hard attn param
-          RL_sumCost=True,  # hard attn param
-          semi_sampling_p=0.5,  # hard attn param
-          temperature=1.,  # hard attn param
-          patience=10,
-          max_epochs=5000,
-          dispFreq=100,
-          decay_c=0.,  # weight decay coeff
-          alpha_c=0.,  # doubly stochastic coeff
-          lrate=0.01,  # used only for SGD
-          selector=False,  # selector (see paper)
-          n_words=10000,  # vocab size
-          maxlen=100,  # maximum length of the description
-          optimizer='rmsprop',
-          batch_size = 16,
-          valid_batch_size = 16,
-          saveto='model.npz',  # relative path of saved model file
-          validFreq=1000,
-          saveFreq=1000,  # save the parameters after every saveFreq updates
-          sampleFreq=100,  # generate some samples after every sampleFreq updates
-          dataset='flickr8k',
-          dictionary=None,  # word dictionary
-          use_dropout=False,  # setting this true turns on dropout at various points
-          use_dropout_lstm=False,  # dropout on lstm gates
-          reload_=False,
-          save_per_epoch=False): # this saves down the model every epoch
-    return locals().copy()
 
 
 # some utilities
@@ -63,12 +24,14 @@ def _p(prefix, name):
 
 layers = {'ff': ('fflayer'),
           'lstm': ('lstm_layer'),
-          'lstm_cond': 'lstm_cond_layer'),
+          'lstm_cond': ('lstm_cond_layer'),
           }
+
 
 def get_layer(name):
     fns = layers[name]
     return (eval(fns[0]), eval(fns[1]))
+
 
 def ortho_weight(ndim):
     """
@@ -99,11 +62,11 @@ def norm_weight(nin, nout=None, scale=0.01, ortho=True):
 
 # some useful shorthands
 def tanh(x):
-    return tensor.tanh(x)
+    return T.tanh(x)
 
 
 def rectifier(x):
-    return tensor.maximum(0., x)
+    return T.maximum(0., x)
 
 
 def linear(x):
@@ -111,6 +74,8 @@ def linear(x):
 
 # How to use pylearn2.models.Model
 # Overider the method which you want to implement first
+
+
 class Layer(Model):
     """ Abstract Class for Layer """
     __prefix__ = 'asbtract'
@@ -139,45 +104,47 @@ class DropOut(Layer):
         one_timestep.local()
 
     def dropout(self, state_below, use_noise):
-        proj = T.switch(use_noise, state_before *
-                        self.rng.binomial(state_before.shape,p=0.5, n=1,
-                                          dtype=state_before.dtype),
-                        state_before *  0.5)
+        proj = T.switch(use_noise, state_below *
+                        self.rng.binomial(state_below.shape, p=0.5, n=1,
+                                          dtype=state_below.dtype),
+                        state_below * 0.5)
         return proj
 
     def fprob_dropout(self):
         pass
 
-class LSTMDropOut(LSTM, DropOut):
-    pass
+
+class LSTM_abstract(Layer):
+    def __init__(self):
+        pass
 
 
 class LSTM(Layer):
     """ version: SAT """
 
-    def __init__(self, state_below, nin, dim, **argv, **kwargs):
+    __prefix__ = "lstm"
+
+    def __init__(self, state_below, nin, dim, *args, **kwargs):
         """
         input:
             state_below: last_layer's output
         """
-        super(LSTM, self).__init__(**argv, **kwargs)
+        super(LSTM, self).__init__(*args, **kwargs)
 
         # input info do not initiate here
         self.dim = dim
         self.nin = nin
         self.n_steps = state_below.shape[0]
-        self.__prefix__ = "lstm"
 
         if state_below.ndim == 3:
             self.n_samples = state_below.shape[1]
-            self.init_state = tensor.alloc(0., self.n_samples, dim)
-            self.init_memory = tensor.alloc(0., self.n_samples, dim)
+            self.init_state = T.alloc(0., self.n_samples, dim)
+            self.init_memory = T.alloc(0., self.n_samples, dim)
         # during sampling
         else:
             self.n_samples = 1
-            self.init_state = tensor.alloc(0., dim)
-            self.init_memory = tensor.alloc(0., dim)
-
+            self.init_state = T.alloc(0., dim)
+            self.init_memory = T.alloc(0., dim)
 
     def __slice(self, x, n, dim):
         if x.ndim == 3:
@@ -186,22 +153,29 @@ class LSTM(Layer):
             return x[:, n*dim:(n+1)*dim]
         return x[n*dim:(n+1)*dim]
 
-    def one_timestep(self, mask, x_, h_, c_): # Why Mask ?????
+    def one_timestep(self, mask, x_, h_, c_):  # Why Mask ?????
         """ corresponding to the def _step() """
-        preact = tensor.dot(h_, self.U)
+        preact = T.dot(h_, self.U)
         preact += x_
 
-        i = tensor.nnet.sigmoid(self.__slice(preact, 0, self.dim))
-        f = tensor.nnet.sigmoid(self.__slice(preact, 1, self.dim))
-        o = tensor.nnet.sigmoid(self.__slice(preact, 2, self.dim))
-        c = tensor.tanh(self.__slice(preact, 3, dim))
+        i = T.nnet.sigmoid(self.__slice(preact, 0, self.dim))
+        f = T.nnet.sigmoid(self.__slice(preact, 1, self.dim))
+        o = T.nnet.sigmoid(self.__slice(preact, 2, self.dim))
+        c = T.tanh(self.__slice(preact, 3, self.dim))
 
         c = f * c_ + i * c
-        h = o * tensor.tanh(c)
+        h = o * T.tanh(c)
 
         return h, c, i, f, o, preact
 
-    def param_init_lstm(self, params={}): # TODO: Make this less shitty...
+    def partial_fprop(self, state_below):
+        """
+        this method implement the partial foward propagation
+        into order for other transformation ex Drop-out
+        """
+        return NotImplementedError
+
+    def param_init_lstm(self, params={}):  # TODO: Make this less shitty...
         """
         Stack the weight matricies for all the gates
         for much cleaner code and slightly faster dot-prods
@@ -222,7 +196,6 @@ class LSTM(Layer):
         if params.get(_p(self.__prefix__, 'b'), None):
             b = numpy.zeros((4 * self.dim,)).astype('float32')
 
-
         # shared the variables
         self.W, self.U, self.b = map(
             lambda x, y: shardedX(x, name=_p(self.__prefix__, y)),
@@ -236,29 +209,37 @@ class LSTM(Layer):
 
     def fprop(self, state_below, mask=None):
         """ forward probagation of LSTM
-            input: (all are tensor variables)
+            input: (all are T variables)
         """
-        if mask == None:
-            mask = tensor.alloc(1., state_below.shape[0], 1)
+        if mask is None:
+            mask = T.alloc(1., state_below.shape[0], 1)
 
-        state_below = tensor.dot(state_below, self.W) + self.b
+        state_below = T.dot(state_below, self.W) + self.b
 
         rval, updates = theano.scan(self.one_timestep,
-                                sequences=[mask, state_below],
-                                outputs_info=[self.init_state, self.init_memory,
-                                              None, None, None, None],
-                                name=_p(prefix, 'layers'),
-                                n_steps=nsteps, profile=False)
+                                    sequences=[mask, state_below],
+                                    outputs_info=[self.init_state,
+                                                  self.init_memory, None,
+                                                  None, None, None],
+                                    name=_p(self.prefix, 'layers'),
+                                    n_steps=self.n_steps, profile=False)
 
-        return ravel, updates
+        return rval, updates
 
     def set_input_space(self):
         pass
 
 
+class LSTMDropOut(LSTM, DropOut):
+
+    @wraps(DropOut.lstm_dropout)
+    def partial_fprop(self):
+        return NotImplementedError
+
+
 class LSTM_with_Attention(LSTM, Block):
     def __init__(self, input, context, prefix='lstm_cond',
-                 attn_type='stochastic', **argv, **kargv):
+                 attn_type='stochastic', *argvs, **kwargs):
         """
         input: the input sequence ()
         context: Z_{t} (alpha, )
@@ -307,7 +288,7 @@ def check_the_config(layers):
         pass
 
 
-class SAT(Model, Block, StackBlocks):
+class SAT(Model, Block, StackedBlocks):
     """ Show, Attend and Tell:
         Neural Image Caption Generation with Visual Attention """
 
