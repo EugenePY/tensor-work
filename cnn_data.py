@@ -1,6 +1,6 @@
 from sys import stdout
 import numpy
-import scipy.misc
+from PIL import Image
 
 from tokenizer import Tokenizer
 
@@ -140,15 +140,17 @@ class CnnDataIter():
         labels = [self.labels[idx] for idx in current_indices]
         image_files = [self.image_files[idx] for idx in current_indices]
         
-        # crop the images
-        images = numpy.empty((batch_size, self.box['bottom'] - self.box['top'], self.box['right'] - self.box['left']))
+        # read and crop the images
+        width = self.box['right'] - self.box['left']
+        height = self.box['bottom'] - self.box['top']
+        images = numpy.empty((batch_size, height, width))
         for i in range(len(image_files)):
-            image = scipy.misc.imread(self.images_path + image_files[i], flatten = True)
-            image = image[self.box['top']:self.box['bottom'], self.box['left']:self.box['right']]
-            image = 255 - image
+            image = Image.open(self.images_path + image_files[i]).crop((self.box['left'], self.box['top'], self.box['right'], self.box['bottom']))
+            image_array = numpy.fromstring(image.tobytes(), dtype = 'uint8', count = -1, sep = '').reshape(height,width)
             
-            images[i,:,:] = image
-            
+            images[i,:,:] = image_array
+        images = images.astype('float32')
+        
         return (labels, images)
     
     def __iter__(self):
