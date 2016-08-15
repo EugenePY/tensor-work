@@ -1,0 +1,17 @@
+!obj:pylearn2.train.Train {
+        dataset: &train !obj:datasets.Im2latex {
+                whichset: 'train',
+                start: 0
+        },
+        model: !obj:model.im2latex.Seq2Seq {
+                encoder_layers:[ !obj:pylearn2.sandbox.rnn.models.rnn.LSTM],
+                bridge_layers:[ !obj:model.highway.HighWay {}],
+                decoder_layers:[ !obj:model.CondLSTMAttention {
+                        attention: !obj:Attention {
+                                layers:[!obj:model.highway.HighWay {}]}}],
+        },
+
+        algorithm: !obj:pylearn2.training_algorithm.sdg.SDG {
+
+        },
+}

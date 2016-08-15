@@ -5,322 +5,235 @@
 An demostration about simple model using pylearn2
 
 """
-import functools
-from pylearn2.models.model import Model
 
-from pylearn2.utils import wraps
-from pylearn2.utils import shardedX
-from pylearn2.blocks import Block, StackedBlocks
-
+import numpy as np
 import theano
 import theano.tensor as T
+
+from pylearn2.space import VectorSpace
+from pylearn2.sandbox.rnn.models.rnn import LSTM
+from pylearn2.sandbox.rnn.space import (SequenceSpace, SequenceDataSpace)
+
+from pylearn2.utils import wraps
+from pylearn2.utils import sharedX
+
+from model.attention import Attention
+
+tensor = T
 from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams
-import numpy
+
+# Define FeatureSpace (Conveoltion ())
+# Captiona Space (max sequence length, n_sample)
+# Mask Space (max seq, n_sample) set([0, 1]),
 
 
-# some utilities
-def _p(prefix, name):
-    return '%s_%s' % (prefix, name)
-
-layers = {'ff': ('fflayer'),
-          'lstm': ('lstm_layer'),
-          'lstm_cond': ('lstm_cond_layer'),
-          }
-
-
-def get_layer(name):
-    fns = layers[name]
-    return (eval(fns[0]), eval(fns[1]))
-
-
-def ortho_weight(ndim):
+class CondLSTM(LSTM):
     """
-    Random orthogonal weights
+    Add condictional information of a LSTM : given some conditional information,
+    for each time-steps.
+    -------------------
 
-    Used by norm_weights(below), in which case, we
-    are ensuring that the rows are orthogonal
-    (i.e W = U \Sigma V, U has the same
-    # of rows, V has the same # of cols)
+    Model Parameters:
+    =================
+        Context :
     """
-    W = numpy.random.randn(ndim, ndim)
-    u, _, _ = numpy.linalg.svd(W)
-    return u.astype('float32')
+    def __init__(self, init_bias_cond=0., **kwargs):
+        super(CondLSTM, self).__init__(**kwargs)
+        self.rnn_friendly = True
+        self.__dict__.update(locals())
+        del self.self
 
+    @wraps(LSTM.set_input_space)
+    def set_input_space(self, input_space):
+        assert isinstance(input_space, CompositeSpace)
+        assert all([isinstance(a, b) for a, b in zip(input_space.components,
+                                                     [SequenceSpace,
+                                                      SequenceDataSpace])])
+        self.input_space = input_space
 
-def norm_weight(nin, nout=None, scale=0.01, ortho=True):
-    """
-    Random weights drawn from a Gaussian
-    """
-    if nout is None:
-        nout = nin
-    if nout == nin and ortho:
-        W = ortho_weight(nin)
-    else:
-        W = scale * numpy.random.randn(nin, nout)
-    return W.astype('float32')
-
-
-# some useful shorthands
-def tanh(x):
-    return T.tanh(x)
-
-
-def rectifier(x):
-    return T.maximum(0., x)
-
-
-def linear(x):
-    return x
-
-# How to use pylearn2.models.Model
-# Overider the method which you want to implement first
-
-
-class Layer(Model):
-    """ Abstract Class for Layer """
-    __prefix__ = 'asbtract'
-    params = {}
-
-    def fprob(self, state_below):
-        return NotImplementedError('Abstract Layer:' + self.__prefix__)
-
-    def activation(self, state_below):
-        return NotImplementedError('Abstract Layer:' + self.__prefix__)
-
-
-class DropOut(Layer):
-    """ DropOut Layer
-    """
-    def __init__(self, selelctor=False, rng=None):
-        if rng is None:
-            rng = RandomStreams(2**123)
-
-        self.rng = rng
-
-    def lstm_dropout(self, one_timestep):
-        assert hasattr(one_timestep, '__call__')
-        assert self.__prefix__ == 'lstm'
-
-        one_timestep.local()
-
-    def dropout(self, state_below, use_noise):
-        proj = T.switch(use_noise, state_below *
-                        self.rng.binomial(state_below.shape, p=0.5, n=1,
-                                          dtype=state_below.dtype),
-                        state_below * 0.5)
-        return proj
-
-    def fprob_dropout(self):
-        pass
-
-
-class LSTM_abstract(Layer):
-    def __init__(self):
-        pass
-
-
-class LSTM(Layer):
-    """ version: SAT """
-
-    __prefix__ = "lstm"
-
-    def __init__(self, state_below, nin, dim, *args, **kwargs):
-        """
-        input:
-            state_below: last_layer's output
-        """
-        super(LSTM, self).__init__(*args, **kwargs)
-
-        # input info do not initiate here
-        self.dim = dim
-        self.nin = nin
-        self.n_steps = state_below.shape[0]
-
-        if state_below.ndim == 3:
-            self.n_samples = state_below.shape[1]
-            self.init_state = T.alloc(0., self.n_samples, dim)
-            self.init_memory = T.alloc(0., self.n_samples, dim)
-        # during sampling
+        if self.indices is not None:
+            if len(self.indices) > 1:
+                raise ValueError("Only indices = [-1] is supported right now")
+                self.output_space = CompositeSpace(
+                    [VectorSpace(dim=self.dim) for _
+                     in range(len(self.indices))]
+                )
+            else:
+                assert self.indices == [-1], "Only indices = [-1] works now"
+                self.output_space = VectorSpace(dim=self.dim)
         else:
-            self.n_samples = 1
-            self.init_state = T.alloc(0., dim)
-            self.init_memory = T.alloc(0., dim)
+            if isinstance(self.input_space, SequenceSpace):
+                self.output_space = SequenceSpace(VectorSpace(dim=self.dim))
+            elif isinstance(self.input_space, SequenceDataSpace):
+                self.output_space =\
+                    SequenceDataSpace(VectorSpace(dim=self.dim))
 
-    def __slice(self, x, n, dim):
-        if x.ndim == 3:
-            return x[:, :, n*dim:(n+1)*dim]
-        elif x.ndim == 2:
-            return x[:, n*dim:(n+1)*dim]
-        return x[n*dim:(n+1)*dim]
+        rng = self.mlp.rng
 
-    def one_timestep(self, mask, x_, h_, c_):  # Why Mask ?????
-        """ corresponding to the def _step() """
-        preact = T.dot(h_, self.U)
-        preact += x_
+        if self.irange is None:
+            raise ValueError("Recurrent layer requires an irange value in "
+                             "order to initialize its weight matrices")
 
-        i = T.nnet.sigmoid(self.__slice(preact, 0, self.dim))
-        f = T.nnet.sigmoid(self.__slice(preact, 1, self.dim))
-        o = T.nnet.sigmoid(self.__slice(preact, 2, self.dim))
-        c = T.tanh(self.__slice(preact, 3, self.dim))
+        input_dim = self.input_space.dim
+        context_dim = self.input_space.components[-1].dim
+        ###### Original Parameters
+        # W is the input-to-hidden matrix
+        W = rng.uniform(-self.irange, self.irange, (input_dim, self.dim * 4))
 
-        c = f * c_ + i * c
-        h = o * T.tanh(c)
+        # U is the hidden-to-hidden transition matrix
+        U = rng.randn(self.dim, self.dim * 4)
+        U, _ = scipy.linalg.qr(U)
 
-        return h, c, i, f, o, preact
+        # b is the bias
+        b = np.zeros((self.dim,))
+        ####### Conditional Parameters (Project the context in the
+              # Hidden Space of LSTM)
+        Wc = rng.uniform(-self.irange, self.irange, (context_dim, self.dim * 4))
 
-    def partial_fprop(self, state_below):
+        Uc = rng.randn(self.dim, self.dim * 4)
+        Uc, _ = scipy.linalg.qr(Uc)
+
+        bc = np.zeros((self.dim,))
+
+
+
+        self._params = [
+            sharedX(W, name=(self.layer_name + '_W')),
+            sharedX(U, name=(self.layer_name + '_U')),
+            sharedX(b + self.init_bias,
+                    name=(self.layer_name + '_b')),
+            sharedX(Wc, name=(self.layer_name + '_Wc')),
+            sharedX(Uc, namae=(self.layer_name + '_Uc')),
+            sharedX(bc + self.init_bias_cond,
+                    name=(self.layey_name + '_bc'))
+        ]
+
+    @wraps(LSTM.fprop)
+    def fprop(self, state_below, return_all=False):
+        assert len(state_below) in [2, 3]
+        if len(state_below) == 3:
+            state_below, mask, context_below = state_below
+        else:
+            state_below, context_below = state_below
+
+        z0 = tensor.alloc(np.cast[config.floatX](0), state_below.shape[1],
+                          self.dim * 2)
+
+        z0 = tensor.unbroadcast(z0, 0)
+        if self.dim == 1:
+            z0 = tensor.unbroadcast(z0, 1)
+
+        W, U, b, Wc, Uc, bc = self._params
+        if self.weight_noise:
+            W = self.add_noise(W)
+            U = self.add_noise(U)
+            Wc = self.add_noise(Wc)
+            Uc = self.add_noise(Uc)
+
+        state_below = tensor.dot(state_below, W) + b
+        context_below = tensor.dot(context_below, Wc) + bc
+
+        if mask is not None:
+            (z, updates) = theano.scan(fn=self.fprop_step_mask,
+                                       sequences=[state_below, mask],
+                                       outputs_info=[z0],
+                                       non_sequences=[context_below, Uc, U])
+        else:
+            (z, updates) = theano.scan(fn=self.fprop_step,
+                                       sequences=[state_below],
+                                       outputs_info=[z0],
+                                       non_sequences=[context_below, Uc, U])
+
+            self._scan_updates.update(updates)
+
+        if return_all:
+            return z
+
+        if self.indices is not None:
+            if len(self.indices) > 1:
+                return [z[i, :, :self.dim] for i in self.indices]
+            else:
+                return z[self.indices[0], :, :self.dim]
+        else:
+            if mask is not None:
+                return (z[:, :, :self.dim], mask)
+            else:
+                return z[:, :, :self.dim]
+
+    def fprop_step_mask(self, state_below, mask,
+                        state_before, context_below, Uc, U):
         """
-        this method implement the partial foward propagation
-        into order for other transformation ex Drop-out
+        Scan function for case using masks
+
+        Parameters
+        ----------
+        : todo
+        state_below : TheanoTensor
         """
-        return NotImplementedError
 
-    def param_init_lstm(self, params={}):  # TODO: Make this less shitty...
+        g_on = state_below + context_below + \
+            tensor.dot(state_before[:, :self.dim], U) + \
+            tensor.dot(context_below[:, self.dim], Uc)
+        i_on = tensor.nnet.sigmoid(g_on[:, :self.dim])
+        f_on = tensor.nnet.sigmoid(g_on[:, self.dim:2*self.dim])
+        o_on = tensor.nnet.sigmoid(g_on[:, 2*self.dim:3*self.dim])
+
+        z = tensor.set_subtensor(state_before[:, self.dim:],
+                                 f_on * state_before[:, self.dim:] +
+                                 i_on * tensor.tanh(g_on[:, 3*self.dim:]))
+        z = tensor.set_subtensor(z[:, :self.dim],
+                                 o_on * tensor.tanh(z[:, self.dim:]))
+
+        # Only update the state for non-masked data, otherwise
+        # just carry on the previous state until the end
+        z = mask[:, None] * z + (1 - mask[:, None]) * state_before
+
+        return z
+
+    def fprop_step(self, state_below, context_below, z, U, Uc):
         """
-        Stack the weight matricies for all the gates
-        for much cleaner code and slightly faster dot-prods
+        Scan function for case without masks
+
+        Parameters
+        ----------
+        : todo
+        state_below : TheanoTensor
         """
-        self.params = params
-        # input weights
-        if self.params.get(_p(self.__prefix__, 'W'), None):
-            W = numpy.concatenate([norm_weight(self.nin, self.dim),
-                                   norm_weight(self.nin, self.dim),
-                                   norm_weight(self.nin, self.dim),
-                                   norm_weight(self.nin, self.dim)], axis=1)
 
-        if self.params.get(_p(self.__prefix__, 'U'), None):
-            U = numpy.concatenate([ortho_weight(self.dim),
-                                   ortho_weight(self.dim),
-                                   ortho_weight(self.dim),
-                                   ortho_weight(self.dim)], axis=1)
-        if params.get(_p(self.__prefix__, 'b'), None):
-            b = numpy.zeros((4 * self.dim,)).astype('float32')
+        g_on = state_below + context_below + \
+            tensor.dot(z[:, :self.dim], U) + \
+            tensor.dot(z, Uc)
+        i_on = tensor.nnet.sigmoid(g_on[:, :self.dim])
+        f_on = tensor.nnet.sigmoid(g_on[:, self.dim:2*self.dim])
+        o_on = tensor.nnet.sigmoid(g_on[:, 2*self.dim:3*self.dim])
 
-        # shared the variables
-        self.W, self.U, self.b = map(
-            lambda x, y: shardedX(x, name=_p(self.__prefix__, y)),
-            zip([W, U, b], ['W', 'U', 'b']))
+        z = tensor.set_subtensor(z[:, self.dim:],
+                                 f_on * z[:, self.dim:] +
+                                 i_on * tensor.tanh(g_on[:, 3*self.dim:]))
+        z = tensor.set_subtensor(z[:, :self.dim],
+                                 o_on * tensor.tanh(z[:, self.dim:]))
 
-        self.params[_p(self.__prefix__, 'b')] = self.b
-        self.params[_p(self.__prefix__, 'U')] = self.U
-        self.params[_p(self.__prefix__, 'W')] = self.W
+        return z
 
-        return self
 
-    def fprop(self, state_below, mask=None):
-        """ forward probagation of LSTM
-            input: (all are T variables)
-        """
-        if mask is None:
-            mask = T.alloc(1., state_below.shape[0], 1)
+class CondLSTMAttention(CondLSTM):
+    """
+    Param
+    =====
+        dim : int #hidden unit
+        layer_name : str
+        attention_mechenism : Attention model object
+    """
+    def __init__(self, attention, **kwargs):
+        super(CondLSTMAttention, self).__init__(**kwargs)
+        self.attention = attention
 
-        state_below = T.dot(state_below, self.W) + self.b
+    def set_attention(self, attention):
+        assert isinstance(attention, Attention)
+        self.attention = attention
 
-        rval, updates = theano.scan(self.one_timestep,
-                                    sequences=[mask, state_below],
-                                    outputs_info=[self.init_state,
-                                                  self.init_memory, None,
-                                                  None, None, None],
-                                    name=_p(self.prefix, 'layers'),
-                                    n_steps=self.n_steps, profile=False)
+    def
 
-        return rval, updates
-
-    def set_input_space(self):
+    @wraps(CondLSTM.get_default_cost)
+    def get_default_cost(self):
         pass
-
-
-class LSTMDropOut(LSTM, DropOut):
-
-    @wraps(DropOut.lstm_dropout)
-    def partial_fprop(self):
-        return NotImplementedError
-
-
-class LSTM_with_Attention(LSTM, Block):
-    def __init__(self, input, context, prefix='lstm_cond',
-                 attn_type='stochastic', *argvs, **kwargs):
-        """
-        input: the input sequence ()
-        context: Z_{t} (alpha, )
-
-        """
-        super(LSTM_with_Attention, self).__init__()
-        self.attn_type = attn_type
-        self.Wc_att = None
-        self.b_att = None
-        self.W = None
-        self.U = None
-
-    def initial_params(self):
-        pass
-
-    def one_timestep(self):
-        pass
-
-    def attn_type(self, attn_type='stochastic'):
-        def attention_decorator(func):
-            @functools.wraps(func)
-            def func_wrapper():
-                pass
-
-    def attention_mechenism(self):
-        """
-        """
-        pass
-
-
-class Embeding(Model, Block):
-    pass
-
-
-class WordEmbededing(Embeding):
-    pass
-
-
-class ContextEmbededfing(Embededing):
-    pass
-
-
-def check_the_config(layers):
-    """ Check the layers are input & output coherent with each others"""
-    for layer in layers:
-        pass
-
-
-class SAT(Model, Block, StackedBlocks):
-    """ Show, Attend and Tell:
-        Neural Image Caption Generation with Visual Attention """
-
-    def __init__(self, layers):
-        # Checking wheather the inputs is valided.
-        pass
-
-    def _update_layer_input_spaces(self):
-        """
-        Tells each layer what its input space should be.
-
-        Notes
-        -----
-        This usually resets the layer's parameters!
-        """
-        layers = self.layers
-        try:
-            layers[0].set_input_space(self.get_input_space())
-        except BadInputSpaceError as e:
-            raise TypeError("Layer 0 (" + str(layers[0]) + " of type " +
-                            str(type(layers[0])) +
-                            ") does not support the SAT's " +
-                            "specified input space (" +
-                            str(self.get_input_space()) +
-                            " of type " + str(type(self.get_input_space())) +
-                            "). Original exception: " + str(e))
-        for i in xrange(1, len(layers)):
-            layers[i].set_input_space(layers[i - 1].get_output_space())
-
-    def build_model(self):
-        pass
-
-
-if __name__ == "__main__":
-    pass

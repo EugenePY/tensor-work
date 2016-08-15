@@ -625,7 +625,7 @@ def build_model(tparams, options, sampling=True):
         # encoder
         ctx_fwd = get_layer('lstm')[1](tparams, ctx.dimshuffle(1,0,2),
                                        options, prefix='encoder')[0].dimshuffle(1,0,2)
-        ctx_rev = get_layer('lstm')[1](tparams, ctx.dimshuffle(1,0,2)[:,::-1,:],
+        ctx_rev = get_layer('lstm')[1](tparams, ctx.dimshuffle(1,0,2)[:,::-1,:], # wrong?
                                        options, prefix='encoder_rev')[0][:,::-1,:].dimshuffle(1,0,2)
         ctx0 = tensor.concatenate((ctx_fwd, ctx_rev), axis=2)
     else:
@@ -836,6 +836,7 @@ def build_sampler(tparams, options, use_noise, trng, sampling=True):
     return f_init, f_next
 
 # generate sample
+
 
 def gen_sample(tparams, f_init, f_next, ctx0, options,
                trng=None, k=1, maxlen=30, stochastic=False):
