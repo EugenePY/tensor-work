@@ -9,6 +9,7 @@ from space import ContextSpace
 from pylearn2.utils import sharedX
 from pylearn2.linear.matrixmul import MatrixMul
 
+
 class LinearAttention(Linear):
 
     @wraps(Linear.set_input_space)
@@ -72,12 +73,11 @@ class LinearAttention(Linear):
             self.mask = sharedX(self.mask_weights)
 
 
-
 class HighWay(LayerLab):
 
-    def __init__(self, dim, layer_name, activation='T.tanh'):
+    def __init__(self, layer_name,
+                 dim=None, activation=lambda x: T.tanh(x)):
         super(HighWay, self).__init__()
-        assert isinstance(activation, str)
         self._params = {'%s_%s'.format(__name__, param): None
                         for param in ['Wh', 'bh', 'Wt', 'bt']}
         self.layer_name = layer_name
@@ -86,13 +86,21 @@ class HighWay(LayerLab):
 
     @wraps(LayerLab.set_input_space)
     def set_input_space(self, space):
-        if not isinstance(space, SequenceDataSpace):
-            raise TypeError("HighWay Layer currently do not support "
-                            "None-SequenceDataSpace:(This Layer is currently "
-                            "support Seq2Seq Model)")
 
         self.input_space = space
-        self.output_space = SequenceDataSpace(VectorSpace(dim=self.dim))
+        if not isinstance(space, VectorSpace):
+            self.required_reformat = True
+            input_dim = self.space.get_total_dimension()
+            self.desired_space = VectorSpace(dim=input_dim)
+        else:
+            self.required_reformat = False
+
+        if self.dim is None:
+            output_space = self.input_space
+        else:
+            output_space = VectorSpace(dim=self.dim)
+
+        self.output_space = output_space
         nin_dim = self.input_space.dim
         out_dim = self.output_space.dim
         self.Wh = norm_weight((nin_dim, out_dim))
@@ -104,8 +112,10 @@ class HighWay(LayerLab):
              zip(self._params.keys(), [self.Wh, self.bh, self.Wt, self.bt])])
 
     def fprop(self, input):
+        self.input_space.validate(input)
         t = T.nnet.sigmoid(T.dot(input, self.Wt) + self.bt)
-        return t * eval(self.activation)(T.dot(input, self.Wh) + self.bh) + \
+        t = T.addbroadcast(t, 1)
+        return t * self.activation(T.dot(input, self.Wh) + self.bh) + \
             (1 - t) * input
 
 

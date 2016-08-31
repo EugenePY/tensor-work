@@ -24,3 +24,7 @@ python im2latex_train.py --yaml im2latex.yaml
 python im2latex --localhost:8888
 
 upload a pdf file
+
+Reference
+---
+[English Char Dataset](http://www.ee.surrey.ac.uk/CVSSP/demos/chars74k/)

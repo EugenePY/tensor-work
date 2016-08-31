@@ -1,0 +1,42 @@
+!obj:pylearn2.train.Train {
+        dataset: &train !obj:datasets.Im2latex {
+                whichset: 'train',
+                start: 0
+        },
+        model: !obj:model.im2latex.Seq2Seq {
+
+                encoder_layers: [ !obj:model.ContextLSTM { 
+                                   layer_name: 'lstm'
+                                   dim: 10, 
+                                   irange: 0.2 } ],
+
+                bridge_layers:[ !obj: model.Seq2Seq.MeanReduce { 
+                                        layer_name: 'mean_reduce', 
+                                        axis: 0 
+                                }, !obj: model.highway.HighWay { 
+                                        layer_name: 'highway',
+                                        irange: 0.2
+                                }, !obj: pylearn2.model.mlp.Linear { 
+                                        layer_name: 'memory_state_proj'
+                                        dim:  20, 
+                                        irange: 0.2 
+                                }],
+
+                embeding: !obj: model.embeding.WordEmbeding { 
+                                        layer_name: 'embeding_layer', 
+                                        dim: 100
+                                },
+                decoder_layers:[ !obj:model.ConditionLSTM { 
+                                        layer_name: 'cond_lstm', 
+                                        dim: 100, 
+                                        irange: 0.2,
+                        attention: !obj:Attention {
+                                layers:[!obj:model.highway.HighWay {}]}
+                                },
+                            ],
+        },
+
+        algorithm: !obj:pylearn2.training_algorithm.sdg.SDG {
+
+        },
+}

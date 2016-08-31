@@ -705,8 +705,8 @@ def build_model(tparams, options, sampling=True):
     probs = tensor.nnet.softmax(logit.reshape([logit_shp[0]*logit_shp[1], logit_shp[2]]))
 
     # Index into the computed probability to give the log likelihood
-    x_flat = x.flatten()
-    p_flat = probs.flatten()
+    x_flat = x.flatten() # time * batch
+    p_flat = probs.flatten() # time * batch * n_class
     cost = -tensor.log(p_flat[tensor.arange(x_flat.shape[0])*probs.shape[1]+x_flat]+1e-8)
     cost = cost.reshape([x.shape[0], x.shape[1]])
     masked_cost = cost * mask
