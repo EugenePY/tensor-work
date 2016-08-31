@@ -11,19 +11,30 @@ training\_algorithms
 utils
 build : containing pretrain models
 
+Dependency
+--
+fuel
+blocks
+
+Preparae the debug dataset
+--
+```shell
+$ fuel-download mnist
+$ fuel-convert mnist
+$ echo export FUEL_DATA_PATH="/first/path/to/my/data:/second/path/to/my/data"
+```
+
+
 Script
 --
-im2latex\_train.py
+train_exp.py
 
 usuage:
 ```shell
 	
-python im2latex_train.py --yaml im2latex.yaml
+python train_exp.py
 ```
 
-python im2latex --localhost:8888
-
-upload a pdf file
 
 Reference
 ---
