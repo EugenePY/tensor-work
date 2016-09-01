@@ -3,8 +3,8 @@ from __future__ import print_function
 import logging
 import yaml
 
-FORMAT = '%(asctime)s-%(name)s-%(message)s'
-DATEFMT = "%M:-%D:-%S:"
+FORMAT = '[%(asctime)s] %(name)s %(message)s'
+DATEFMT = "%M:-%D:-%S"
 
 logger = logging.basicConfig(format=FORMAT, datefmt=DATEFMT, level=logging.INFO)
 
@@ -90,19 +90,21 @@ def main():
     print("     dataset: %s" % dataset)
     # --------------- Building Model ----------------
 
-    glim_net = GlimpseNetwork(dim=100,
+    glim_net = GlimpseNetwork(dim=50, loc_emb=50,
                               n_channels=channels, img_height=img_height,
                               img_width=img_width, N=40, name='glimpse_net',
                               **inits) # output (n)
 
-    core = CoreNetwork(input_dim=100, dim=100, name='core_net',
+    core = CoreNetwork(input_dim=50, dim=50, name='core_net',
                        **inits)
 
-    loc_net = LocationNetwork(100, glim_net.sensor, name='loc_net', **inits)
+    loc_net = LocationNetwork(input_dim=50, loc_emb=50,
+                              sensor=glim_net.sensor, name='loc_net', **inits)
 
-    action = ActionNetwork(100, n_classes=n_classes, name='action',**inits)
+    action = ActionNetwork(input_dim=50, n_classes=n_classes,
+                           name='action',**inits)
 
-    ram = RAM(core, glim_net, loc_net, action, 100, name='RAM', **inits)
+    ram = RAM(core, glim_net, loc_net, action, n_steps=10, name='RAM', **inits)
     ram.initialize()
     # -------------------------------------------------------------
 
@@ -115,10 +117,10 @@ def main():
     # get loc network param
     # ---------------- Building Reinforce alforithm ----------------
     loc_params = reduce(lambda x, y: x+y,
-                        [list(net.parameters) for net in loc_net.children])
+                        [list(net.parameters) for net in
+                         list(loc_net.children) + list(glim_net.children)])
 
-    others_bricks = list(glim_net.children) + list(core.children) + \
-        list(action.children)
+    others_bricks = list(core.children) + list(action.children)
 
     reinforce = REINFORCE()
 
@@ -132,8 +134,9 @@ def main():
     cost_true = CategoricalCrossEntropy().apply(y, y_dis)
     cg = ComputationGraph([cost_true])
 
+    # filter out initial_state
     others_params = VariableFilter(roles=[PARAMETER],
-                                   bricks=others_bricks)(cg.variables) # filter out initial_state
+                                   bricks=others_bricks)(cg.variables)
 
     other_grad = T.grad(cost_true, others_params)
     # Hybrid Cost

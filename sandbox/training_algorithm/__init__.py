@@ -86,7 +86,7 @@ if __name__ == '__main__':
     n_classes = 10
     test_data = {x: np.random.normal(size=(n_steps, batch_size, input_dim)
                                      ).astype(np.float32),
-                 y: np.random.randint(n_classes, size=(batch_size,)
+                 y: np.random.randint(n_classes, size=(batch_size, )
                                       ).astype(np.int32)}
     inits = {
         'weights_init': IsotropicGaussian(0.1),
@@ -129,3 +129,4 @@ if __name__ == '__main__':
     print prop
     a = REINFORCE()
     o = a.build_reinforce_cost_reward_base(y, prop.reshape((n_steps, batch_size, n_classes)))
+    print [i.eval(test_data) for i in o]

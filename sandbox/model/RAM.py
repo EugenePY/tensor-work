@@ -3,13 +3,13 @@ import theano.tensor as T
 import numpy as np
 
 from blocks.bricks.base import application
-from blocks.bricks.parallel import Merge
-from blocks.bricks.simple import Rectifier, Linear, Softmax
+from blocks.bricks.simple import Linear, Softmax
 from blocks.bricks.recurrent import recurrent, LSTM, BaseRecurrent
 from blocks.bricks import Random, Initializable
 from blocks.initialization import IsotropicGaussian, Constant
 
 floatX = theano.config.floatX
+
 
 class GlimpseSensor(object):
     def __init__(self, channels, img_height, img_width, N):
@@ -186,18 +186,16 @@ class GlimpseSensor(object):
         center_x = l[:, 1]
         log_delta = l[:, 2]
         log_sigma = l[:, 3]
-        log_gamma = l[:, 4]
 
         delta = T.exp(log_delta)
         sigma = T.exp(log_sigma/2.)
-        gamma = T.exp(log_gamma).dimshuffle(0, 'x')
 
         # normalize coordinates
         center_x = (center_x+1.)/2. * self.img_width
         center_y = (center_y+1.)/2. * self.img_height
         delta = (max(self.img_width, self.img_height)-1) / (self.N-1) * delta
 
-        return center_y, center_x, delta, sigma, gamma
+        return center_y, center_x, delta, sigma
 
 
 class GlimpseNetwork(Initializable):
@@ -210,16 +208,16 @@ class GlimpseNetwork(Initializable):
         output_dim (batch_size, dim)
 
     """
-    def __init__(self, dim, n_channels, img_height, img_width, N,
+    def __init__(self, loc_emb, dim, n_channels, img_height, img_width, N,
                  activations=None, **kwargs):
 
         super(GlimpseNetwork, self).__init__(**kwargs)
-
+        self.loc_emb = loc_emb
         self.sensor = GlimpseSensor(channels=n_channels,
                                     img_height=img_height,
                                     img_width=img_width, N=N)
 
-        self.glimpes_0 = Linear(input_dim=5, output_dim=dim,
+        self.glimpes_0 = Linear(input_dim=loc_emb, output_dim=4,
                                 name=self.name + '_glimp_0',
                                 weights_init=self.weights_init,
                                 biases_init=self.biases_init)
@@ -229,21 +227,14 @@ class GlimpseNetwork(Initializable):
                                 weights_init=self.weights_init,
                                 biases_init=self.biases_init)
 
-        self.glimpes_out = Merge(input_names=['hidden_g0', 'hidden_g1'],
-                                 input_dims=[self.glimpes_0.get_dim('output'),
-                                             self.glimpes_1.get_dim('output')],
-                                 output_dim=dim,
-                                 prototype=Rectifier(),
-                                 **kwargs)
-
-        self.children = [self.glimpes_0, self.glimpes_1, self.glimpes_out]
+        self.children = [self.glimpes_0, self.glimpes_1]  # self.glimpes_out]
         self.output_dim = dim
 
     def get_dim(self, name):
         if name == 'img':
             return self.sensor.get_dim('img')
         elif name == 'l_last':
-            return 5
+            return self.loc_emb
         else:
             raise ValueError
 
@@ -261,24 +252,24 @@ class GlimpseNetwork(Initializable):
         ------
         h_g : (batch_size, output_dim)
         """
-        l_unpack = self.sensor.nn2att(l_last)[:-1]
-        glimpes = self.sensor.read(img, *l_unpack)
         h0 = self.glimpes_0.apply(l_last)
+        l_unpack = self.sensor.nn2att(h0)
+        glimpes = self.sensor.read(img, *l_unpack)
         h1 = self.glimpes_1.apply(glimpes)
-        hidden_g = self.glimpes_out.apply(hidden_g0=h0, hidden_g1=h1)
+        hidden_g = T.nnet.relu(h1)
         return hidden_g
 
 
 class LocationNetwork(Initializable, Random):
-    def __init__(self, input_dim, sensor, **kwargs):
+    def __init__(self, input_dim, loc_emb, sensor, **kwargs):
         super(LocationNetwork, self).__init__(**kwargs)
-        self.prior_mean = 0.
-        self.prior_log_sigma = 0.
         # self.linear = Linear()
+        self.loc_emb = loc_emb
         self.transform = Linear(
-                input_dim=input_dim, output_dim=5,
-            weights_init=self.weights_init,
-            biases_init=self.biases_init)
+                input_dim=input_dim, output_dim=loc_emb,
+                weights_init=self.weights_init,
+                biases_init=self.biases_init)
+
         self.sensor = sensor
         self.children = [self.transform]
 
@@ -290,15 +281,12 @@ class LocationNetwork(Initializable, Random):
         else:
             raise ValueError
 
-    def sample_from_prior(self, prior_sample):
-        pass
-
     @application(inputs=['hidden_g'], outputs=['l'])
     def apply(self, hidden_g):
         return self.transform.apply(hidden_g)
 
 
-class CoreNetwork(BaseRecurrent, Initializable):
+class CoreNetwork(Initializable):
     def __init__(self, input_dim, dim, **kwargs):
         super(CoreNetwork, self).__init__(**kwargs)
         self.input_dim = input_dim
@@ -321,8 +309,7 @@ class CoreNetwork(BaseRecurrent, Initializable):
         else:
             raise ValueError
 
-    @recurrent(sequences=['inputs'], states=['state', 'cell'], contexts=[],
-               outputs=['state', 'cell'])
+    @application
     def apply(self, inputs, state, cell):
         state, cell = self.lstm.apply(self.proj.apply(inputs), state, cell,
                                       iterate=False)
@@ -377,7 +364,7 @@ class RAM(BaseRecurrent, Initializable):
         if name in ['img', 'null_var']:
             return self.glimpes_network.get_dim('img')
         elif name == 'l_last':
-            return 5
+            return self.glimpes_network.loc_emb
         elif name == 'action':
             return self.action_network.output_dim
         elif name == 'state':
@@ -393,7 +380,7 @@ class RAM(BaseRecurrent, Initializable):
     def apply(self, null_var, img, l_last, state, cell):
         img = img + null_var
         hidden_g = self.glimpes_network.apply(img, l_last)
-        state, cell = self.core.apply(hidden_g, state, cell, iterate=False)
+        state, cell = self.core.apply(hidden_g, state, cell)
         action = self.action_network.apply(state)
         l = self.location_network.apply(state)
         return l, action, state, cell
@@ -406,9 +393,9 @@ class RAM(BaseRecurrent, Initializable):
         l, action, state, cell = self.apply(null_var, img)
         return l, action, state, cell
 
-    def initial_state(self, batch_size, *args, **kwargs):
-        return []
-
+    @recurrent(sequences=[])
+    def sample_loc(self, img):
+        pass
 
 if __name__ == '__main__':
     from blocks.graph import ComputationGraph
@@ -425,9 +412,10 @@ if __name__ == '__main__':
 
     glim_net = GlimpseNetwork(dim=12,
                               n_channels=3, img_height=100,
-                              img_width=200, N=20, name='glimpes_net',**inits)
+                              img_width=200, N=20, name='glimpes_net',
+                              **inits)
     core = CoreNetwork(input_dim=12, dim=30, name='core_net', **inits)
-    loc_net = LocationNetwork(30, glim_net.sensor, name='loc_net',**inits)
+    loc_net = LocationNetwork(30, glim_net.sensor, name='loc_net', **inits)
     # Test loc net
     action = ActionNetwork(30, 30, **inits)
     ram = RAM(core, glim_net, loc_net, action, 30, name='RAM', **inits)
@@ -443,17 +431,17 @@ if __name__ == '__main__':
     rval = h_g.eval({img: test[0], l: test[1]})
     assert rval.shape == (5, 12)
     print str(glim_net) + ' Pass ...'
-    os = core.apply(h_g, state, cell, iterate=False)
+    os = core.apply(h_g, state, cell)
     rvals = [o.eval({img: test[0], l: test[1], state:test[2], cell:test[3]})
              for o in os]
 
     assert all([rvali.shape == (5, 30) for rvali in rvals])
     print str(core) + ' Pass ...'
     # rval = action.applys()
-    fn = ram.out(img, l, state, cell)
+    fn = ram.out(img)
     cg = ComputationGraph(fn)
-    out = theano.function([img, l, state, cell], fn,
+    out = theano.function([img], fn,
                           allow_input_downcast=True)
-    res = out(*test)
+    res = out(test[0])
     print [rvalj.shape for rvalj in res]
     print res[1][0]
