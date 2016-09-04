@@ -1,7 +1,7 @@
 import theano
 import theano.tensor as T
 from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams
-from pylearn2.models.mlp import Layer
+#from pylearn2.models.mlp import Layer
 from util.topology import Node
 
 
@@ -9,8 +9,7 @@ from util.topology import Node
 # How to use pylearn2.models.Model                       #
 # Overider the method which you want to implement first  #
 ##########################################################
-
-
+'''
 class LayerLab(Layer):
     """ Abstract Class for Layer
         Meta Class Only Define the basic topology operation
@@ -90,3 +89,4 @@ class LayerLab(Layer):
 
         self._inbound_node = layer
         return self
+'''

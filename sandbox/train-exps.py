@@ -1,48 +1,43 @@
 from __future__ import print_function
 
 import logging
-import yaml
-
-FORMAT = '[%(asctime)s] %(name)s %(message)s'
-DATEFMT = "%M:-%D:-%S"
-
-logger = logging.basicConfig(format=FORMAT, datefmt=DATEFMT, level=logging.INFO)
-
+import sys
 import os
-import theano
-import theano.tensor as T
-import fuel
-import numpy as np
-import ipdb
 import time
-import cPickle as pickle
-
-from theano import tensor
+import theano.tensor as T
 
 from fuel.streams import DataStream
 from fuel.schemes import SequentialScheme
 from fuel.transformers import Flatten
 
-from blocks.algorithms import GradientDescent, CompositeRule, StepClipping, RMSProp, Adam
-from blocks.bricks import Tanh, Identity
+from blocks.algorithms import (GradientDescent, CompositeRule, StepClipping,
+                               Adam)
 from blocks.bricks.cost import CategoricalCrossEntropy
-from blocks.bricks.recurrent import SimpleRecurrent, LSTM
-from blocks.initialization import Constant, IsotropicGaussian, Orthogonal
+from blocks.initialization import Constant, IsotropicGaussian
 from blocks.filter import VariableFilter
 from blocks.graph import ComputationGraph
 from blocks.roles import PARAMETER
-from blocks.monitoring import aggregation
 from blocks.extensions import FinishAfter, Timing, Printing, ProgressBar
-from blocks.extensions.saveload import Checkpoint
-from blocks.extensions.monitoring import DataStreamMonitoring, TrainingDataMonitoring
+from blocks.extensions.monitoring import (DataStreamMonitoring,
+                                          TrainingDataMonitoring)
 from blocks.main_loop import MainLoop
 from blocks.model import Model
 # from blocks.extras import Plot
 
 import datasets
 from model.RAM import (RAM, GlimpseNetwork, LocationNetwork, ActionNetwork,
-                   CoreNetwork)
+                       CoreNetwork)
+
+from checkpoints import PartsOnlyCheckpoint  # ,SampleAttentionCheckpoint
 from training_algorithm import REINFORCE
+
+FORMAT = '[%(asctime)s] %(name)s %(message)s'
+DATEFMT = "%M:%D:%S"
+
+logging.basicConfig(format=FORMAT, datefmt=DATEFMT, level=logging.INFO)
+logger = logging.getLogger('ROOT')
+sys.setrecursionlimit(100000)
+
 
 def main():
     dataset = 'mnist'
@@ -66,45 +61,29 @@ def main():
         data_train, iteration_scheme=SequentialScheme(
             data_train.num_examples, batch_size)))
 
-    valid_stream = Flatten(DataStream.default_stream(
-        data_valid, iteration_scheme=SequentialScheme(
-            data_valid.num_examples, batch_size)))
-
-    test_stream  = Flatten(DataStream.default_stream(
+    test_stream = Flatten(DataStream.default_stream(
         data_test,  iteration_scheme=SequentialScheme(
             data_test.num_examples, batch_size)))
 
-    def lr_tag(value):
-        """ Convert a float into a short tag-usable string representation. E.g.:
-            0.1   -> 11
-            0.01  -> 12
-            0.001 -> 13
-            0.005 -> 53
-        """
-        exp = np.floor(np.log10(value))
-        leading = ("%e"%value)[0]
-        return "%s%d" % (leading, -exp)
-
-    lr_str = lr_tag(learning_rate)
-
-    print("     dataset: %s" % dataset)
+    logger.info("experiment dataset: %s" % dataset)
     # --------------- Building Model ----------------
 
-    glim_net = GlimpseNetwork(dim=50, loc_emb=50,
+    glim_net = GlimpseNetwork(dim=100,
                               n_channels=channels, img_height=img_height,
-                              img_width=img_width, N=40, name='glimpse_net',
-                              **inits) # output (n)
+                              img_width=img_width, N=4, name='glimpse_net',
+                              **inits)  # output (n)
 
-    core = CoreNetwork(input_dim=50, dim=50, name='core_net',
+    core = CoreNetwork(input_dim=100, dim=100, name='core_net',
                        **inits)
 
-    loc_net = LocationNetwork(input_dim=50, loc_emb=50,
-                              sensor=glim_net.sensor, name='loc_net', **inits)
+    loc_net = LocationNetwork(input_dim=100, loc_emb=2, name='loc_net', **inits)
 
-    action = ActionNetwork(input_dim=50, n_classes=n_classes,
-                           name='action',**inits)
+    action = ActionNetwork(input_dim=100, n_classes=n_classes,
+                           name='action', **inits)
 
-    ram = RAM(core, glim_net, loc_net, action, n_steps=10, name='RAM', **inits)
+    ram = RAM(core=core, glimpes_network=glim_net,
+              location_network=loc_net, action_network=action,
+              n_steps=15, name='RAM', **inits)
     ram.initialize()
     # -------------------------------------------------------------
 
@@ -116,16 +95,19 @@ def main():
 
     # get loc network param
     # ---------------- Building Reinforce alforithm ----------------
-    loc_params = reduce(lambda x, y: x+y,
-                        [list(net.parameters) for net in
-                         list(loc_net.children) + list(glim_net.children)])
+    loc_bricks = list(loc_net.children)  # + list(glim_net.children)
 
-    others_bricks = list(core.children) + list(action.children)
+    others_bricks = list(core.children) + list(action.children) + \
+        list(glim_net.children)
 
     reinforce = REINFORCE()
 
     cost_re, reward, baseline = \
         reinforce.build_reinforce_cost_reward_base(y, actions)
+
+    cg_rein = ComputationGraph([cost_re])
+    loc_params = VariableFilter(roles=[PARAMETER],
+                                bricks=loc_bricks)(cg_rein.variables)
 
     loc_grad = reinforce.build_reinforce_grad(cost_re, loc_params, reward,
                                               baseline)
@@ -163,23 +145,30 @@ def main():
     acc.name = 'accuratcy'
     monitors = [cost_true, cost_re, acc]
     train_monitors = monitors
+
+    # monitor_img = data_train.data_sources[0][:10*20].reshape((200, -1))
     # Live plotting...
-    #plot_channels = [
+    # plot_channels = [
     #    ["cost_true", "reinforce_cost"]
-    #]
+    # ]
 
     # ------------------------------------------------------------
 
-    #plotting_extensions = [
+    # plotting_extensions = [
     #        Plot(name, channels=plot_channels)
-    #    ]
+    # ]
+    subdir = './exp/' + name + "-" + time.strftime("%Y%m%d-%H%M%S")
+
+    if not os.path.exists(subdir):
+        os.makedirs(subdir)
+
     main_loop = MainLoop(
         model=Model(cost_true),
         data_stream=train_stream,
         algorithm=algorithm,
         extensions=[
             Timing(),
-            FinishAfter(after_n_epochs=5),
+            FinishAfter(after_n_epochs=100),
             TrainingDataMonitoring(
                 train_monitors,
                 prefix="train",
@@ -189,7 +178,14 @@ def main():
                 test_stream,
                 prefix="test"),
             ProgressBar(),
-            Printing()])
+            Printing(),
+            # SampleAttentionCheckpoint(monitor_img=monitor_img,
+            #    image_size=image_size[0], channels=channels,
+            #    save_subdir='{}'.format(subdir),
+            #    before_training=True, after_training=True),
+            PartsOnlyCheckpoint("{}/{}".format(subdir, name),
+                                before_training=True, after_epoch=True,
+                                save_separately=['log', 'model'])])
 
     main_loop.run()
 

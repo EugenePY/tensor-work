@@ -5,19 +5,16 @@ from __future__ import print_function, division
 import logging
 import theano
 import theano.tensor as T
-import cPickle as pickle
-
+from blocks.model import Model
 import numpy as np
 import os
 
 from PIL import Image
-from blocks.main_loop import MainLoop
-from blocks.model import Model
-from blocks.config import config
 
 FORMAT = '[%(asctime)s] %(name)-15s %(message)s'
 DATEFMT = "%H:%M:%S"
 logging.basicConfig(format=FORMAT, datefmt=DATEFMT, level=logging.INFO)
+
 
 def scale_norm(arr):
     arr = arr - arr.min()
@@ -27,6 +24,7 @@ def scale_norm(arr):
 # these aren't paramed yet in a generic way, but these values work
 ROWS = 10
 COLS = 20
+
 
 def img_grid(arr, global_scale=True):
     N, channels, height, width = arr.shape
@@ -44,7 +42,7 @@ def img_grid(arr, global_scale=True):
     #     rows = rows + 1
 
     total_height = rows * height + 9
-    total_width  = cols * width + 19
+    total_width = cols * width + 19
 
     if global_scale:
         arr = scale_norm(arr)
@@ -62,11 +60,12 @@ def img_grid(arr, global_scale=True):
             this = scale_norm(arr[i])
 
         offset_y, offset_x = r*height+r, c*width+c
-        I[0:channels, offset_y:(offset_y+height), offset_x:(offset_x+width)] = this
+        I[0:channels, offset_y:(offset_y+height),
+          offset_x:(offset_x+width)] = this
 
     I = (255*I).astype(np.uint8)
     if(channels == 1):
-        out = I.reshape( (total_height, total_width) )
+        out = I.reshape((total_height, total_width))
     else:
         out = np.dstack(I).astype(np.uint8)
     return Image.fromarray(out)
@@ -82,38 +81,32 @@ def generate_samples(p, batch, subdir, output_size, channels):
     ram = model.get_top_bricks()[0]
     # reset the random generator
 
-    #------------------------------------------------------------
+    # ------------------------------------------------------------
     logging.info("Compiling sample function...")
     img = T.matrix('img')
+    img_loc = ram.sample(img)
 
-    l, _, _, _ = ram.out(img)
+    do_sample = theano.function([img], outputs=img_loc,
+                                allow_input_downcast=True)
 
-    do_sample = theano.function([img], outputs=l, allow_input_downcast=True)
-
-    #------------------------------------------------------------
+    # ------------------------------------------------------------
     logging.info("Sampling and saving images...")
 
-    global ROWS, COLS
     samples = do_sample(batch)
-    #samples = np.random.normal(size=(16, 100, 28*28))
+    # samples = np.random.normal(size=(16, 100, 28*28))
 
     n_iter, N, D = samples.shape
     # logging.info("SHAPE IS: {}".format(samples.shape))
 
-    samples = samples.reshape( (n_iter, N, channels, output_size, output_size) )
+    samples = samples.reshape((n_iter, N, channels, output_size, output_size))
 
     if(n_iter > 0):
-        img = img_grid(samples[n_iter-1,:,:,:])
+        img = img_grid(samples[n_iter-1, :, :, :])
         img.save("{0}/sample.png".format(subdir))
 
     for i in xrange(n_iter-1):
-        img = img_grid(samples[i,:,:,:])
+        img = img_grid(samples[i, :, :, :])
         img.save("{0}/time-{1:03d}.png".format(subdir, i))
 
-    #with open("centers.pkl", "wb") as f:
-    #    pikle.dump(f, (center_y, center_x, delta))
-    os.system("convert -delay 5 {0}/time-*.png -delay 300 {0}/sample.png {0}/sequence.gif".format(subdir))
-
-
-
-
+    os.system("convert -delay 5 {0}/time-*.png -delay 300 "
+              "{0}/sample.png {0}/sequence.gif".format(subdir))

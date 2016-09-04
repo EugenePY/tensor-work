@@ -1,5 +1,6 @@
 import theano
 import theano.tensor as T
+import theano.tensor.nnet.neighbours
 import numpy as np
 
 from blocks.bricks.base import application
@@ -27,6 +28,7 @@ class GlimpseSensor(object):
         self.img_height = img_height
         self.img_width = img_width
         self.N = N
+        self.emb_dim = 4
 
     def get_dim(self, name):
         if name == 'W':
@@ -198,6 +200,88 @@ class GlimpseSensor(object):
         return center_y, center_x, delta, sigma
 
 
+class GlimpseSensorBeta(GlimpseSensor):
+    """
+    Pure Location-based Sensor,
+        --- Continuous location
+    """
+    def __init__(self, boarder=[[-1., 1.], [-1., 1.]], stride_size=None,
+                 **kwargs):
+        super(GlimpseSensorBeta, self).__init__(**kwargs)
+        self.boarder = boarder
+        if stride_size is None:
+            stride_size = (self.N, self.N)
+        self.stride_size = stride_size
+        self.emb_dim = 2
+        self.step_x, self.step_y = self.stride_size
+        self.total_step_x = (self.img_width - self.N) // self.step_x + 1
+        self.total_step_y = (self.img_height - self.N) // self.step_y + 1
+
+        if any([self.total_step_x <= 0, self.total_step_y <= 0]):
+            raise ValueError('stride size to big')
+
+        self.total_step = self.total_step_x * self.total_step_y
+
+    def map_float_to_index(self, center_x, center_y):
+        x_board, y_board = self.boarder
+
+        loc_x = T.cast((self.total_step_x - 1) *
+                       (center_x - x_board[0]) // 2, 'int32')
+        loc_y = T.cast((self.total_step_y - 1) *
+                       (center_y - y_board[0]) // 2, 'int32')
+        idx = self.total_step_y * loc_x + loc_y
+        return idx
+
+    def read(self, img, center_x, center_y):
+        idx = self.map_float_to_index(center_x, center_y)
+        batch_size = img.shape[0]
+        img_4d = img.reshape((batch_size, self.channels, self.img_height,
+                              self.img_width))
+        neighbours = T.nnet.neighbours.images2neibs(img_4d,
+                                                    neib_shape=(self.N, self.N),
+                                                    neib_step=self.stride_size)
+        # (batch_size * dim * step_x * step_y)
+        neighbours_new = neighbours.reshape((batch_size,
+                                             self.channels, self.total_step,
+                                             self.N * self.N))
+
+        def select_step(sub_neibor, id):
+            return sub_neibor[:, id]
+
+        nei, _ = theano.map(select_step, sequences=[neighbours_new, idx])
+        return nei.reshape((batch_size, self.channels * self.N * self.N))
+
+    def write(self, w, center_x, center_y):
+        x_board, y_board = self.boarder
+        step_x, step_y = self.stride_size
+        # this should be interger
+        total_step_x = (self.img_width - self.N) // step_x + 1
+        total_step_y = (self.img_height - self.N) // step_y + 1
+
+        idx = self.map_float_to_index(center_x, center_y)
+        batch_size = w.shape[0]
+
+        w_buffer = T.zeros((batch_size * self.channels,
+                            total_step_x * total_step_y,
+                            self.N, self.N))
+
+        w_buffer = T.set_subtensor(w_buffer[:, idx], w.reshape((batch_size,
+                                                                self.channels,
+                                                                self.N,
+                                                                self.N)))
+        imgs = T.nnet.neighbours.neibs2images(
+            w_buffer, (self.N, self.N), (self.img_height, self.img_width))
+        return imgs
+
+    def nn2att(self, l):
+        center_x_emb = l[:, 0]
+        center_y_emb = l[:, 1]
+
+        center_x = T.tanh(center_x_emb)
+        center_y = T.tanh(center_y_emb)
+        return center_x, center_y
+
+
 class GlimpseNetwork(Initializable):
     """
     GlimpseSensor & Linear + Rectifier
@@ -208,16 +292,22 @@ class GlimpseNetwork(Initializable):
         output_dim (batch_size, dim)
 
     """
-    def __init__(self, loc_emb, dim, n_channels, img_height, img_width, N,
+    def __init__(self, dim,
+                 n_channels, img_height, img_width, N,
                  activations=None, **kwargs):
 
         super(GlimpseNetwork, self).__init__(**kwargs)
-        self.loc_emb = loc_emb
-        self.sensor = GlimpseSensor(channels=n_channels,
-                                    img_height=img_height,
-                                    img_width=img_width, N=N)
+        # self.sensor = GlimpseSensor(channels=n_channels,
+        #                             img_height=img_height,
+        #                             img_width=img_width, N=N)
+        self.sensor = GlimpseSensorBeta(channels=n_channels,
+                                        img_height=img_height,
+                                        img_width=img_width, N=N)
 
-        self.glimpes_0 = Linear(input_dim=loc_emb, output_dim=4,
+        self.loc_emb = self.sensor.emb_dim
+
+        self.glimpes_0 = Linear(input_dim=self.loc_emb,
+                                output_dim=dim,
                                 name=self.name + '_glimp_0',
                                 weights_init=self.weights_init,
                                 biases_init=self.biases_init)
@@ -234,11 +324,12 @@ class GlimpseNetwork(Initializable):
         if name == 'img':
             return self.sensor.get_dim('img')
         elif name == 'l_last':
-            return self.loc_emb
+            return self.sensor.emb_dim
         else:
             raise ValueError
 
-    @application(inputs=['img', 'l_last'], outputs=['hidden_g'])
+    @application(contexts=['img'], sequences=[],
+                 state=['l_last'], outputs=['hidden_g'])
     def apply(self, img, l_last):
         """
         Params
@@ -252,25 +343,24 @@ class GlimpseNetwork(Initializable):
         ------
         h_g : (batch_size, output_dim)
         """
-        h0 = self.glimpes_0.apply(l_last)
-        l_unpack = self.sensor.nn2att(h0)
+        l_unpack = self.sensor.nn2att(l_last)
         glimpes = self.sensor.read(img, *l_unpack)
+        h0 = self.glimpes_0.apply(l_last)
         h1 = self.glimpes_1.apply(glimpes)
-        hidden_g = T.nnet.relu(h1)
+        hidden_g = T.nnet.relu(h1+h0)
         return hidden_g
 
 
 class LocationNetwork(Initializable, Random):
-    def __init__(self, input_dim, loc_emb, sensor, **kwargs):
+    def __init__(self, input_dim, loc_emb, **kwargs):
         super(LocationNetwork, self).__init__(**kwargs)
         # self.linear = Linear()
-        self.loc_emb = loc_emb
         self.transform = Linear(
-                input_dim=input_dim, output_dim=loc_emb,
+                input_dim=input_dim,
+                output_dim=loc_emb,
                 weights_init=self.weights_init,
                 biases_init=self.biases_init)
 
-        self.sensor = sensor
         self.children = [self.transform]
 
     def get_dim(self, name):
@@ -286,7 +376,7 @@ class LocationNetwork(Initializable, Random):
         return self.transform.apply(hidden_g)
 
 
-class CoreNetwork(Initializable):
+class CoreNetwork(BaseRecurrent, Initializable):
     def __init__(self, input_dim, dim, **kwargs):
         super(CoreNetwork, self).__init__(**kwargs)
         self.input_dim = input_dim
@@ -309,7 +399,8 @@ class CoreNetwork(Initializable):
         else:
             raise ValueError
 
-    @application
+    @recurrent(sequences=['inputs'], states=['state', 'cell'], contexts=[],
+               outputs=['state', 'cell'])
     def apply(self, inputs, state, cell):
         state, cell = self.lstm.apply(self.proj.apply(inputs), state, cell,
                                       iterate=False)
@@ -361,7 +452,7 @@ class RAM(BaseRecurrent, Initializable):
                          self.action_network]
 
     def get_dim(self, name):
-        if name in ['img', 'null_var']:
+        if name in 'img':
             return self.glimpes_network.get_dim('img')
         elif name == 'l_last':
             return self.glimpes_network.loc_emb
@@ -372,15 +463,14 @@ class RAM(BaseRecurrent, Initializable):
         elif name == 'cell':
             return self.core.get_dim('cell')
         else:
-            return super(RAM, self).get_dim(name)
+            raise ValueError
 
-    @recurrent(sequences=['null_var'],
+    @recurrent(sequences=[],
                contexts=['img'], states=['l_last', 'state', 'cell'],
                outputs=['l_last', 'action', 'state', 'cell'])
-    def apply(self, null_var, img, l_last, state, cell):
-        img = img + null_var
+    def apply(self, img, l_last, state, cell):
         hidden_g = self.glimpes_network.apply(img, l_last)
-        state, cell = self.core.apply(hidden_g, state, cell)
+        state, cell = self.core.apply(hidden_g, state, cell, iterate=False)
         action = self.action_network.apply(state)
         l = self.location_network.apply(state)
         return l, action, state, cell
@@ -388,22 +478,40 @@ class RAM(BaseRecurrent, Initializable):
     @application(inputs=['img'],
                  outputs=['l', 'action', 'state', 'cell'])
     def out(self, img):
-        null_var = T.zeros((self.n_steps, img.shape[0], img.shape[1]))
-        null_var.name = 'null_var'
-        l, action, state, cell = self.apply(null_var, img)
+        batch_size = img.shape[0]
+        l, action, state, cell = self.apply(img, n_steps=self.n_steps,
+                                            batch_size=batch_size)
         return l, action, state, cell
 
-    @recurrent(sequences=[])
-    def sample_loc(self, img):
-        pass
+    @recurrent(sequences=[],
+               contexts=['img'], states=['l_last', 'state', 'cell'],
+               outputs=['l_last', 'action', 'state', 'cell', 'img_loc'])
+    def detail_sample(self, img, l_last, state, cell):
+        hidden_g = self.glimpes_network.apply(img, l_last)
+        state, cell = self.core.apply(hidden_g, state, cell, iterate=False)
+        action = self.action_network.apply(state)
+        l = self.location_network.apply(state)
+        sensor = self.glimpes_network.sensor
+        loc = sensor.nn2att(l)
+        W = sensor.read(img, *loc)
+        img_loc = sensor.write(W, *loc)
+        return l, action, state, cell, img_loc
+
+    @application(inputs=['img'], outputs=['img_loc'])
+    def sample(self, img):
+        batch_size = img.shape[0]
+        _, _, _, _, img_loc = self.detail_sample(img, n_steps=self.n_steps,
+                                                 batch_size=batch_size)
+        return img_loc
+
 
 if __name__ == '__main__':
     from blocks.graph import ComputationGraph
 
-    test = (np.random.normal(size=(5, 100 * 200 * 3)).astype(floatX),
-            np.random.normal(size=(5, 5)).astype(floatX),
-            np.random.normal(size=(5, 30)).astype(floatX),
-            np.random.normal(size=(5, 30)).astype(floatX))
+    test = (np.random.normal(size=(100, 28 * 28 * 1)).astype(floatX),
+            np.random.normal(size=(100, 2)).astype(floatX),
+            np.random.normal(size=(100, 30)).astype(floatX),
+            np.random.normal(size=(100, 30)).astype(floatX))
 
     inits = {
         'weights_init': IsotropicGaussian(0.01),
@@ -411,14 +519,17 @@ if __name__ == '__main__':
     }
 
     glim_net = GlimpseNetwork(dim=12,
-                              n_channels=3, img_height=100,
-                              img_width=200, N=20, name='glimpes_net',
+                              n_channels=1, img_height=28,
+                              img_width=28,
+                              N=4, name='glimpes_net',
                               **inits)
-    core = CoreNetwork(input_dim=12, dim=30, name='core_net', **inits)
-    loc_net = LocationNetwork(30, glim_net.sensor, name='loc_net', **inits)
+    core = CoreNetwork(input_dim=12, dim=30,
+                       name='core_net', **inits)
+    loc_net = LocationNetwork(30, loc_emb=2,
+                              name='loc_net', **inits)
     # Test loc net
-    action = ActionNetwork(30, 30, **inits)
-    ram = RAM(core, glim_net, loc_net, action, 30, name='RAM', **inits)
+    action = ActionNetwork(30, 4, **inits)
+    ram = RAM(core, glim_net, loc_net, action, 31, name='RAM', **inits)
     ram.initialize()
 
     img = T.matrix('img')
@@ -429,19 +540,20 @@ if __name__ == '__main__':
     # Tests
     h_g = glim_net.apply(img, l)
     rval = h_g.eval({img: test[0], l: test[1]})
-    assert rval.shape == (5, 12)
+    assert rval.shape == (100, 12)
     print str(glim_net) + ' Pass ...'
-    os = core.apply(h_g, state, cell)
+    os = core.apply(h_g, state, cell, iterate=False)
     rvals = [o.eval({img: test[0], l: test[1], state:test[2], cell:test[3]})
              for o in os]
+    print rvals
 
-    assert all([rvali.shape == (5, 30) for rvali in rvals])
+    print [rvali.shape for rvali in rvals]
     print str(core) + ' Pass ...'
     # rval = action.applys()
     fn = ram.out(img)
+
     cg = ComputationGraph(fn)
     out = theano.function([img], fn,
                           allow_input_downcast=True)
     res = out(test[0])
-    print [rvalj.shape for rvalj in res]
-    print res[1][0]
+    print [i for i in res][1]

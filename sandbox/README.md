@@ -27,12 +27,12 @@ $ echo export FUEL_DATA_PATH="/first/path/to/my/data:/second/path/to/my/data"
 
 Script
 --
-train_exp.py
+train-exp.py
 
 usuage:
 ```shell
 	
-python train_exp.py
+python train-exp.py
 ```
 
 

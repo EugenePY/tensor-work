@@ -3,7 +3,6 @@ REINFORCE algorithms for Expected log Likelihood and log Likelihood
 Deriviation : refer to REINFORCE.pdf
 """
 
-import theano
 import theano.tensor as T
 from blocks.bricks.base import Brick, application
 # from blocks.algorithms import GradientDescent
@@ -58,7 +57,8 @@ class REINFORCE(Brick):
         n_steps, batch_size, n_classes = y_dis.shape
         y_, y_dis_ = self._pre_process(y, y_dis)
         cost_m = self.cost_matrix(y_, y_dis_, n_steps, batch_size)
-        reward = self.reward(y_, y_dis_, n_steps, batch_size)  # n_steps, batch_size
+        reward = self.reward(y_, y_dis_, n_steps, batch_size)
+        # n_steps, batch_size
         base = self.baseline(reward, y_dis_, n_steps, batch_size)
         reward_cum = self.expected_reward(reward)
         return (cost_m * (reward_cum - base)).sum(0).mean(), reward_cum, base
@@ -123,10 +123,11 @@ if __name__ == '__main__':
     cg = ComputationGraph(cost_new)
     params = VariableFilter(roles=[PARAMETER])(cg.variables)
     grad = T.grad(cost_new, params, consider_constant=[reward_cum, base])
-    #fn = theano.function(inputs=[x, y], outputs=grad)
-    #print fn(test_data[x], test_data[y])
+    # fn = theano.function(inputs=[x, y], outputs=grad)
+    # print fn(test_data[x], test_data[y])
 
     print prop
     a = REINFORCE()
-    o = a.build_reinforce_cost_reward_base(y, prop.reshape((n_steps, batch_size, n_classes)))
+    o = a.build_reinforce_cost_reward_base(
+        y, prop.reshape((n_steps, batch_size, n_classes)))
     print [i.eval(test_data) for i in o]
