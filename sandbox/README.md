@@ -7,12 +7,12 @@ Im2Latex
 
 Project Structure
 --
-models : model scripts
-spaces
-costs
-training\_algorithms
-utils
-build : containing pretrain models
+- models : model scripts
+- spaces
+- costs
+- training\_algorithms
+- utils
+- build : containing pretrain models
 
 Dependency
 --
