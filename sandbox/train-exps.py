@@ -70,7 +70,7 @@ def main():
 
     glim_net = GlimpseNetwork(dim=100,
                               n_channels=channels, img_height=img_height,
-                              img_width=img_width, N=4, name='glimpse_net',
+                              img_width=img_width, N=7, name='glimpse_net',
                               **inits)  # output (n)
 
     core = CoreNetwork(input_dim=100, dim=100, name='core_net',
@@ -184,7 +184,7 @@ def main():
                                       channels=channels,
                                       save_subdir='{}'.format(subdir),
                                       before_training=True,
-                                      after_training=True),
+                                      after_epoch=True),
             PartsOnlyCheckpoint("{}/{}".format(subdir, name),
                                 before_training=True, after_epoch=True,
                                 save_separately=['log', 'model'])])

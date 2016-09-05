@@ -247,8 +247,8 @@ class GlimpseSensorBeta(GlimpseSensor):
                                                     neib_step=self.stride_size)
         # (batch_size * dim * step_x * step_y)
         neighbours_new = T.reshape(neighbours, (batch_size,
-                                             self.channels, self.total_step,
-                                             self.N * self.N), ndim=4)
+                                   self.channels, self.total_step,
+                                   self.N * self.N), ndim=4)
 
         def select_step(sub_neibor, id):
             return sub_neibor[:, id]
@@ -273,8 +273,8 @@ class GlimpseSensorBeta(GlimpseSensor):
                                                     neib_step=self.stride_size)
         # (batch_size * dim * step_x * step_y)
         neighbours_new = T.reshape(neighbours, (batch_size,
-                                             self.channels, self.total_step,
-                                             self.N, self.N), ndim=5)
+                                   self.channels, self.total_step,
+                                   self.N, self.N), ndim=5)
 
         def select_step(tag, sub_neibor, id):
             sub_neibor_new = T.set_subtensor(
@@ -318,11 +318,11 @@ class GlimpseSensorBeta(GlimpseSensor):
         return imgs
 
     def nn2att(self, l):
-        center_x_emb = l[:, 0]
-        center_y_emb = l[:, 1]
+        center_x = l[:, 0]
+        center_y = l[:, 1]
 
-        center_x = T.tanh(center_x_emb)
-        center_y = T.tanh(center_y_emb)
+        # center_x = T.tanh(center_x_emb)
+        # center_y = T.tanh(center_y_emb)
         return center_x, center_y
 
 
@@ -417,7 +417,7 @@ class LocationNetwork(Initializable, Random):
 
     @application(inputs=['hidden_g'], outputs=['l'])
     def apply(self, hidden_g):
-        return self.transform.apply(hidden_g)
+        return T.tanh(self.transform.apply(hidden_g))
 
 
 class CoreNetwork(BaseRecurrent, Initializable):
@@ -481,7 +481,7 @@ class RAM(BaseRecurrent, Random, Initializable):
     step_output : which space to output
     """
     def __init__(self, core, glimpes_network, location_network,
-                 action_network, n_steps, random_init_loc=False, **kwargs):
+                 action_network, n_steps, random_init_loc=True, **kwargs):
 
         super(RAM, self).__init__(**kwargs)
         self.core = core  # projec to hidden state
@@ -496,8 +496,9 @@ class RAM(BaseRecurrent, Random, Initializable):
                          self.action_network]
 
     def random_init(self, batch_size, name):
-        state_init = self.theano_rng.normal(avg=0., std=1., size=(batch_size,
-                                            self.get_dim(name)))
+        state_init = self.theano_rng.uniform(low=-1., high=1.,
+                                             size=(batch_size,
+                                                   self.get_dim(name)))
         return state_init
 
     def get_dim(self, name):

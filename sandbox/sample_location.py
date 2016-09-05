@@ -83,13 +83,6 @@ def img_grid(arr, global_scale=True):
     return Image.fromarray(out)
 
 
-def loc2image_retangle(loc, img, sensor):
-    """
-    Only support Symbolic inputs
-    """
-    center_xs, center_ys = loc
-
-
 def generate_samples(p, batch, subdir, output_size, channels):
     if isinstance(p, Model):
         model = p
@@ -132,15 +125,15 @@ def generate_samples(p, batch, subdir, output_size, channels):
     channels = sensor.channels
     batch_size_non_symbolic = samples.shape[0] // n_steps_non_symbolic
 
-    samples = samples.reshape((n_steps_non_symbolic, batch_size_non_symbolic,
+    samples = samples.reshape((batch_size_non_symbolic, n_steps_non_symbolic,
                                channels, img_height, img_width))
 
     if(n_steps_non_symbolic > 0):
-        img = img_grid(samples[n_steps_non_symbolic - 1, :, :, :])
+        img = img_grid(samples[:, n_steps_non_symbolic - 1, :, :])
         img.save("{0}/sample.png".format(subdir))
 
     for i in xrange(n_steps_non_symbolic-1):
-        img = img_grid(samples[i, :, :, :])
+        img = img_grid(samples[:, i, :, :])
         img.save("{0}/time-{1:03d}.png".format(subdir, i))
 
     os.system("convert -delay 5 {0}/time-*.png -delay 300 "

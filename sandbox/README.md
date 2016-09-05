@@ -1,6 +1,8 @@
 Im2Latex
 --
-This project using some desing pattern borrowing from PyLearn2
+Recurrent Attention Model
+
+![alt tag](https://raw.githubusercontent.com/eugenepy/tensor-work/sandbox/exp/mnist-20160906-003950/sequence.gif))
 
 Project Structure
 --
