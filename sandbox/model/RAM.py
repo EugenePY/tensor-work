@@ -8,8 +8,13 @@ from blocks.bricks.simple import Linear, Softmax
 from blocks.bricks.recurrent import recurrent, LSTM, BaseRecurrent
 from blocks.bricks import Random, Initializable
 from blocks.initialization import IsotropicGaussian, Constant
-
+from sample_location import img_ratangle
 floatX = theano.config.floatX
+
+
+def double_relu(x, alpha=0):
+    # return T.nnet.relu(1 - T.nnet.relu(x + 1))  # linear normal
+    return (T.nnet.relu(x - 0.5) - T.nnet.relu(x - 2.5)) - 1
 
 
 class GlimpseSensor(object):
@@ -241,15 +246,54 @@ class GlimpseSensorBeta(GlimpseSensor):
                                                     neib_shape=(self.N, self.N),
                                                     neib_step=self.stride_size)
         # (batch_size * dim * step_x * step_y)
-        neighbours_new = neighbours.reshape((batch_size,
+        neighbours_new = T.reshape(neighbours, (batch_size,
                                              self.channels, self.total_step,
-                                             self.N * self.N))
+                                             self.N * self.N), ndim=4)
 
         def select_step(sub_neibor, id):
             return sub_neibor[:, id]
 
         nei, _ = theano.map(select_step, sequences=[neighbours_new, idx])
         return nei.reshape((batch_size, self.channels * self.N * self.N))
+
+    def att_mark(self, img, action, center_x, center_y):
+        """
+        This method is for monitoring the training behavior.
+        """
+        action = action + 1  # making color is different from others (0, 1)
+
+        idx = self.map_float_to_index(center_x, center_y)
+        batch_size = img.shape[0]
+        img_4d = img.reshape((batch_size, self.channels, self.img_height,
+                              self.img_width))
+        retagle_idx_x, retagle_idx_y = img_ratangle(
+            (self.N, self.N))
+        neighbours = T.nnet.neighbours.images2neibs(img_4d,
+                                                    neib_shape=(self.N, self.N),
+                                                    neib_step=self.stride_size)
+        # (batch_size * dim * step_x * step_y)
+        neighbours_new = T.reshape(neighbours, (batch_size,
+                                             self.channels, self.total_step,
+                                             self.N, self.N), ndim=5)
+
+        def select_step(tag, sub_neibor, id):
+            sub_neibor_new = T.set_subtensor(
+                sub_neibor[:, id, retagle_idx_x, retagle_idx_y], tag)
+            return sub_neibor_new
+
+        nei, _ = theano.scan(select_step,
+                             sequences=[action, neighbours_new, idx],
+                             outputs_info=[None])
+        nei = nei.reshape((batch_size * self.channels * self.total_step,
+                           self.N * self.N))
+        if self.stride_size != (self.N, self.N):
+            raise ValueError('Current do not support none default stride_size.'
+                             ' Got %s'.format(self.stride_size,))
+        imgs = T.nnet.neighbours.neibs2images(
+            nei, (self.N, self.N), (self.img_height, self.img_width))
+
+        return imgs.reshape((batch_size, self.channels, self.img_height,
+                             self.img_width))
 
     def write(self, w, center_x, center_y):
         x_board, y_board = self.boarder
@@ -345,9 +389,9 @@ class GlimpseNetwork(Initializable):
         """
         l_unpack = self.sensor.nn2att(l_last)
         glimpes = self.sensor.read(img, *l_unpack)
-        h0 = self.glimpes_0.apply(l_last)
-        h1 = self.glimpes_1.apply(glimpes)
-        hidden_g = T.nnet.relu(h1+h0)
+        h0 = T.nnet.relu(self.glimpes_0.apply(l_last))
+        h1 = T.nnet.relu(self.glimpes_1.apply(glimpes))
+        hidden_g = T.nnet.relu(h1 + h0)
         return hidden_g
 
 
@@ -427,7 +471,7 @@ class ActionNetwork(Initializable):
         return self.out.apply(self.transform.apply(hidden_g))
 
 
-class RAM(BaseRecurrent, Initializable):
+class RAM(BaseRecurrent, Random, Initializable):
     """
     Recurrent Attention Model (RAM)
 
@@ -436,9 +480,8 @@ class RAM(BaseRecurrent, Initializable):
     core : core type layer
     step_output : which space to output
     """
-
     def __init__(self, core, glimpes_network, location_network,
-                 action_network, n_steps, **kwargs):
+                 action_network, n_steps, random_init_loc=False, **kwargs):
 
         super(RAM, self).__init__(**kwargs)
         self.core = core  # projec to hidden state
@@ -446,10 +489,16 @@ class RAM(BaseRecurrent, Initializable):
         self.action_network = action_network  # action network
         self.location_network = location_network
         self.n_steps = n_steps
+        self.random_init_loc = random_init_loc
 
         self.children = [self.glimpes_network, self.core,
                          self.location_network,
                          self.action_network]
+
+    def random_init(self, batch_size, name):
+        state_init = self.theano_rng.normal(avg=0., std=1., size=(batch_size,
+                                            self.get_dim(name)))
+        return state_init
 
     def get_dim(self, name):
         if name in 'img':
@@ -475,6 +524,21 @@ class RAM(BaseRecurrent, Initializable):
         l = self.location_network.apply(state)
         return l, action, state, cell
 
+    @application(outputs=apply.states)
+    def initial_states(self, batch_size, *arg, **kwargs):
+        results = []
+        for state in self.apply.states:
+            dim = self.get_dim(state)
+            if dim == 0:
+                raise ValueError('Currently do not upport dim = 0. Got dim 0'
+                                 ' on variable %s'.format(state))
+            if self.random_init_loc and state == 'l_last':
+                res = self.random_init(batch_size, state)
+            else:
+                res = T.zeros((batch_size, dim))
+            results.append(res)
+        return results
+
     @application(inputs=['img'],
                  outputs=['l', 'action', 'state', 'cell'])
     def out(self, img):
@@ -492,6 +556,7 @@ class RAM(BaseRecurrent, Initializable):
         action = self.action_network.apply(state)
         l = self.location_network.apply(state)
         sensor = self.glimpes_network.sensor
+
         loc = sensor.nn2att(l)
         W = sensor.read(img, *loc)
         img_loc = sensor.write(W, *loc)

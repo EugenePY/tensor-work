@@ -28,7 +28,7 @@ import datasets
 from model.RAM import (RAM, GlimpseNetwork, LocationNetwork, ActionNetwork,
                        CoreNetwork)
 
-from checkpoints import PartsOnlyCheckpoint  # ,SampleAttentionCheckpoint
+from checkpoints import PartsOnlyCheckpoint, SampleAttentionCheckpoint
 from training_algorithm import REINFORCE
 
 FORMAT = '[%(asctime)s] %(name)s %(message)s'
@@ -65,7 +65,7 @@ def main():
         data_test,  iteration_scheme=SequentialScheme(
             data_test.num_examples, batch_size)))
 
-    logger.info("experiment dataset: %s" % dataset)
+    logging.info("experiment dataset: %s" % dataset)
     # --------------- Building Model ----------------
 
     glim_net = GlimpseNetwork(dim=100,
@@ -146,7 +146,7 @@ def main():
     monitors = [cost_true, cost_re, acc]
     train_monitors = monitors
 
-    # monitor_img = data_train.data_sources[0][:10*20].reshape((200, -1))
+    monitor_img = data_train.data_sources[0][:10*20].reshape((200, -1))
     # Live plotting...
     # plot_channels = [
     #    ["cost_true", "reinforce_cost"]
@@ -179,10 +179,12 @@ def main():
                 prefix="test"),
             ProgressBar(),
             Printing(),
-            # SampleAttentionCheckpoint(monitor_img=monitor_img,
-            #    image_size=image_size[0], channels=channels,
-            #    save_subdir='{}'.format(subdir),
-            #    before_training=True, after_training=True),
+            SampleAttentionCheckpoint(monitor_img=monitor_img,
+                                      image_size=image_size[0],
+                                      channels=channels,
+                                      save_subdir='{}'.format(subdir),
+                                      before_training=True,
+                                      after_training=True),
             PartsOnlyCheckpoint("{}/{}".format(subdir, name),
                                 before_training=True, after_epoch=True,
                                 save_separately=['log', 'model'])])
