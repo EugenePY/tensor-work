@@ -1,8 +1,9 @@
 Im2Latex
---
-Recurrent Attention Model
+==
+- Recurrent Attention Model
 
-![alt tag](https://raw.githubusercontent.com/eugenepy/tensor-work/sandbox/exp/mnist-20160906-003950/sequence.gif)
+
+![Example] (https://raw.githubusercontent.com/EugenePY/tensor-work/master/sandbox/exp/mnist-20160906-003950/sequence.gif)
 
 Project Structure
 --
