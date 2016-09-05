@@ -40,5 +40,5 @@ python train-exp.py
 
 Reference
 ---
-[English Char Dataset](http://www.ee.surrey.ac.uk/CVSSP/demos/chars74k/)
-[Recurrent Models of Visual Attention](https://papers.nips.cc/paper/5542-recurrent-models-of-visual-attention.pdf)
+- [English Char Dataset](http://www.ee.surrey.ac.uk/CVSSP/demos/chars74k/)
+- [Recurrent Models of Visual Attention](https://papers.nips.cc/paper/5542-recurrent-models-of-visual-attention.pdf)
