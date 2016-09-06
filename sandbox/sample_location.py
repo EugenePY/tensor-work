@@ -110,7 +110,7 @@ def generate_samples(p, batch, subdir, output_size, channels):
 
     action_flat = T.argmax(action_flat, axis=1)  # this is for coloring
 
-    img_sampling = sensor.att_mark(img_flat, action_flat, img_loc_flat[:, 0],
+    img_sampling = sensor.att_mark(img_flat, img_loc_flat[:, 0],
                                    img_loc_flat[:, 1])
     do_sample = theano.function([img], outputs=img_sampling,
                                 allow_input_downcast=True)
@@ -122,7 +122,7 @@ def generate_samples(p, batch, subdir, output_size, channels):
     n_steps_non_symbolic = ram.n_steps - 1  # we have drop one-step
     img_width = sensor.img_width
     img_height = sensor.img_height
-    channels = sensor.channels
+    channels = 3  # RGB imgae
     batch_size_non_symbolic = samples.shape[0] // n_steps_non_symbolic
 
     samples = samples.reshape((batch_size_non_symbolic, n_steps_non_symbolic,

@@ -256,11 +256,11 @@ class GlimpseSensorBeta(GlimpseSensor):
         nei, _ = theano.map(select_step, sequences=[neighbours_new, idx])
         return nei.reshape((batch_size, self.channels * self.N * self.N))
 
-    def att_mark(self, img, action, center_x, center_y):
+    def att_mark(self, img, center_x, center_y):
         """
         This method is for monitoring the training behavior.
         """
-        action = action + 1  # making color is different from others (0, 1)
+        # action = action + 1  # making color is different from others (0, 1)
 
         idx = self.map_float_to_index(center_x, center_y)
         batch_size = img.shape[0]
@@ -275,25 +275,35 @@ class GlimpseSensorBeta(GlimpseSensor):
         neighbours_new = T.reshape(neighbours, (batch_size,
                                    self.channels, self.total_step,
                                    self.N, self.N), ndim=5)
+        if self.channels == 1:
+            neighbours_new = T.repeat(neighbours_new, 3, axis=1)
 
-        def select_step(tag, sub_neibor, id):
+        def select_step(sub_neibor, id):
+            sub_neibor = T.set_subtensor(
+                sub_neibor[0, id, retagle_idx_x, retagle_idx_y], 255)
             sub_neibor_new = T.set_subtensor(
-                sub_neibor[:, id, retagle_idx_x, retagle_idx_y], tag)
+                sub_neibor[1:, id, retagle_idx_x, retagle_idx_y], 0)
             return sub_neibor_new
 
         nei, _ = theano.scan(select_step,
-                             sequences=[action, neighbours_new, idx],
+                             sequences=[neighbours_new, idx],
                              outputs_info=[None])
-        nei = nei.reshape((batch_size * self.channels * self.total_step,
-                           self.N * self.N))
+        if self.channels == 1:
+            nei = nei.reshape((batch_size * 3 * self.total_step,
+                              self.N * self.N))
+        else:
+            nei = nei.reshape((batch_size * 3 * self.total_step,
+                              self.N * self.N))
+
         if self.stride_size != (self.N, self.N):
             raise ValueError('Current do not support none default stride_size.'
                              ' Got %s'.format(self.stride_size,))
         imgs = T.nnet.neighbours.neibs2images(
             nei, (self.N, self.N), (self.img_height, self.img_width))
-
-        return imgs.reshape((batch_size, self.channels, self.img_height,
-                             self.img_width))
+        if self.channels == 1:
+            out = imgs.reshape((batch_size, 3, self.img_height,
+                                self.img_width))
+        return out
 
     def write(self, w, center_x, center_y):
         x_board, y_board = self.boarder
