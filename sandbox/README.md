@@ -1,22 +1,23 @@
 Im2Latex
---
-Recurrent Attention Model
+==
+- Recurrent Attention Model
 
-![alt tag](https://raw.githubusercontent.com/eugenepy/tensor-work/sandbox/exp/mnist-20160906-003950/sequence.gif))
+![Example] (https://raw.githubusercontent.com/EugenePY/tensor-work/master/sandbox/exp/mnist-20160906-003950/sequence.gif)
 
 Project Structure
 --
-models : model scripts
-spaces
-costs
-training\_algorithms
-utils
-build : containing pretrain models
+- models : RAM
+- costs : Expected log Likelihood
+- training\_algorithms: REINFORCE algorithm
+- utils
+- build : containing pretrain models
 
 Dependency
 --
-fuel
-blocks
+- Theano
+- Fuel
+- Blocks & Block extra
+- Scikit-Image
 
 Preparae the debug dataset
 --
@@ -25,7 +26,6 @@ $ fuel-download mnist
 $ fuel-convert mnist
 $ echo export FUEL_DATA_PATH="/first/path/to/my/data:/second/path/to/my/data"
 ```
-
 
 Script
 --
@@ -40,4 +40,5 @@ python train-exp.py
 
 Reference
 ---
-[English Char Dataset](http://www.ee.surrey.ac.uk/CVSSP/demos/chars74k/)
+- [English Char Dataset](http://www.ee.surrey.ac.uk/CVSSP/demos/chars74k/)
+- [Recurrent Models of Visual Attention](https://papers.nips.cc/paper/5542-recurrent-models-of-visual-attention.pdf)
