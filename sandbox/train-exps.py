@@ -49,7 +49,7 @@ def main():
 
     learning_rate = 1e-3
     name = dataset
-    oldmodel = './exp/mnist-20160906-154631/mnist_model'
+    oldmodel = None
 
     inits = {
         'weights_init': IsotropicGaussian(0.01),

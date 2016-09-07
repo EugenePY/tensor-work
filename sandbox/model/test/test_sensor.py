@@ -7,9 +7,9 @@ from PIL import Image
 import theano.tensor.nnet.neighbours
 from model.RAM import GlimpseSensorBeta, RetinaGlimpse
 
-#theano.config.optimizer='fast_compile'
+# theano.config.optimizer='fast_compile'
 # theano.config.exception_verbosity='high'
-#theano.config.compute_test_value = 'warn'
+# theano.config.compute_test_value = 'warn'
 
 r = 20
 channels = 3
@@ -19,6 +19,7 @@ batch_size = 100
 
 sensor = RetinaGlimpse(img_width=width, img_height=height,
                        channels=channels, radius=r, n_retina=5)
+print sensor.pading_size
 img = T.tensor4('features')
 center_x = T.vector('x')
 center_y = T.vector('y')
@@ -108,10 +109,17 @@ pylab.imshow(imagify(I, height, width), interpolation='nearest')
 pylab.figure()
 pylab.gray()
 pylab.imshow(imagify(W[:, :channels], 2*r, 2*r), interpolation='nearest')
+pylab.savefig('./retina0.png')
 
 pylab.figure()
 pylab.gray()
 pylab.imshow(imagify(W[:,channels:channels*2], 2*r, 2*r), interpolation='nearest')
+pylab.savefig('./retina1.png')
+
+pylab.figure()
+pylab.gray()
+
+pylab.imshow(imagify(W[:,channels*2:channels*3], 2*r, 2*r), interpolation='nearest')
+pylab.savefig('./retina2.png')
 
 pylab.show(block=True)
-

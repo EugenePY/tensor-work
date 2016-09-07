@@ -235,11 +235,11 @@ class GlimpseSensorBeta(GlimpseSensor):
         loc_y = T.cast((self.total_step_y - 1) *
                        (center_y - y_board[0]) // 2, 'int32')
         idx = self.total_step_y * loc_x + loc_y
-        return loc_x, loc_y, idx
+        return idx
 
     # @application(inputs=['img', 'center_x', 'center_y'], outputs=['glimpes'])
     def read(self, img, center_x, center_y):
-        _, _, idx = self.map_float_to_index(center_x, center_y)
+        idx = self.map_float_to_index(center_x, center_y)
         batch_size = img.shape[0]
         img_4d = img.reshape((batch_size, self.channels, self.img_height,
                               self.img_width))
@@ -393,6 +393,7 @@ class RetinaGlimpse(object):
         return img_4d.reshape((batch_size,
                                self.channels * self.img_width *
                                self.img_height))
+
     def padding_img(self, img):
         batch_size = img.shape[0]
         img_paded = T.zeros((batch_size, self.channels,
@@ -486,7 +487,8 @@ class GlimpseNetwork(Initializable):
 
         self.glimpes_out = Linear(input_dim=dim*2, output_dim=dim,
                                   name=self.name + '_glimp_out',
-                                  **kwargs)
+                                  weights_init=self.weights_init,
+                                  biases_init=self.biases_init)
 
         self.children = [self.glimpes_0, self.glimpes_1, self.glimpes_out]
         self.output_dim = dim
