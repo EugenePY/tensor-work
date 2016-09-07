@@ -4,6 +4,15 @@ Im2Latex
 
 ![Example] (https://raw.githubusercontent.com/EugenePY/tensor-work/master/sandbox/exp/mnist-20160906-185501/sequence.gif)
 
+Glimpes sensor
+==
+- simple glimpes
+![Example] (https://raw.githubusercontent.com/EugenePY/tensor-work/master/sandbox/retina0.png)
+- Retina glimpes
+![Example] (https://raw.githubusercontent.com/EugenePY/tensor-work/master/sandbox/retina1.png)
+![Example] (https://raw.githubusercontent.com/EugenePY/tensor-work/master/sandbox/retina2.png)
+
+
 Project Structure
 --
 - models : RAM
