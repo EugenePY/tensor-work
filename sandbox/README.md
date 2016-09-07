@@ -6,6 +6,8 @@ Im2Latex
 
 Glimpes sensor
 ==
+- Source image
+![Example] (https://raw.githubusercontent.com/EugenePY/tensor-work/master/sandbox/model/test/cat.jpg)
 - simple glimpes
 ![Example] (https://raw.githubusercontent.com/EugenePY/tensor-work/master/sandbox/retina0.png)
 - Retina glimpes
