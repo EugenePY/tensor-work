@@ -3,7 +3,7 @@ import theano.tensor as T
 import theano.tensor.nnet.neighbours
 import numpy as np
 
-from blocks.bricks.base import application
+from blocks.bricks.base import application  # , Brick
 from blocks.bricks.simple import Linear, Softmax
 from blocks.bricks.recurrent import recurrent, LSTM, BaseRecurrent
 from blocks.bricks import Random, Initializable
@@ -215,7 +215,7 @@ class GlimpseSensorBeta(GlimpseSensor):
         super(GlimpseSensorBeta, self).__init__(**kwargs)
         self.boarder = boarder
         if stride_size is None:
-            stride_size = (self.N, self.N)
+            stride_size = (self.N, self.N)  # None overlap stride
         self.stride_size = stride_size
         self.emb_dim = 2
         self.step_x, self.step_y = self.stride_size
@@ -235,10 +235,11 @@ class GlimpseSensorBeta(GlimpseSensor):
         loc_y = T.cast((self.total_step_y - 1) *
                        (center_y - y_board[0]) // 2, 'int32')
         idx = self.total_step_y * loc_x + loc_y
-        return idx
+        return loc_x, loc_y, idx
 
+    # @application(inputs=['img', 'center_x', 'center_y'], outputs=['glimpes'])
     def read(self, img, center_x, center_y):
-        idx = self.map_float_to_index(center_x, center_y)
+        _, _, idx = self.map_float_to_index(center_x, center_y)
         batch_size = img.shape[0]
         img_4d = img.reshape((batch_size, self.channels, self.img_height,
                               self.img_width))
@@ -336,6 +337,118 @@ class GlimpseSensorBeta(GlimpseSensor):
         return center_x, center_y
 
 
+class RetinaGlimpse(object):
+    """
+    Location-based Retina Sensor,
+        --- Continuous location, this can do more complex glimpes operation
+        for each (x, y) we not only do chop but also do pooling.
+
+    """
+    __axis_order = ('b', 'r', 'c', 0, 1)
+
+    def __init__(self, img_width, img_height, channels,
+                 n_retina=3, retina_strides=(2, 2), radius=3,
+                 boarder=[[-1., 1], [-1., 1]], include_center=False):
+
+        self.include_center = include_center
+        self.boarder = boarder
+        self.img_width = img_width
+        self.img_height = img_height
+        self.channels = channels
+        self.n_retina = n_retina
+        self.retina_strides = retina_strides
+        self.radius = radius
+        # XXX: Need to check the retina stride if using include center mode
+
+        # we need to pad this size of buffer (max level of retina bufffer)
+        self.pading_size = \
+            (2 * self.radius * (self.retina_strides[0] ** n_retina),
+             2 * self.radius * (self.retina_strides[1] ** n_retina))
+
+    @property
+    def axis_order(self):
+        # do not allow to change the order (no setter or deleter)
+        return self.__axis_order
+
+    def float2center_pixel(self, x, y):
+        x_board, y_board = self.boarder
+        # loc_x and loc_y is in the center ratangle
+        loc_x = T.cast((self.img_width - self.radius * 2) *
+                       (x - x_board[0]) // 2 + self.pading_size[0]//2,
+                       'int32')
+        loc_y = T.cast((self.img_height - self.radius * 2) *
+                       (y - y_board[0]) // 2 + self.pading_size[1]//2,
+                       'int32')
+        return loc_x, loc_y
+
+    def matrix2tensor4(self, img_2d):
+        # only for input usuage
+        batch_size = img_2d.shape[0]
+        return img_2d.reshape((batch_size, self.channels, self.img_height,
+                               self.img_width))
+
+    def tensor4d2matrix(self, img_4d):
+        # only for input usuage
+        batch_size = img_4d.shape[0]
+        return img_4d.reshape((batch_size,
+                               self.channels * self.img_width *
+                               self.img_height))
+    def padding_img(self, img):
+        batch_size = img.shape[0]
+        img_paded = T.zeros((batch_size, self.channels,
+                             self.img_height + self.pading_size[0],
+                             self.img_width + self.pading_size[1]))
+        offset = (self.pading_size[0] // 2, self.pading_size[1] // 2)
+        # this expected a non-include center patch
+        img_paded = T.set_subtensor(
+            img_paded[:, :, offset[0]:self.img_height + offset[0],
+                      offset[1]:self.img_width + offset[1]], img)
+        return img_paded
+
+    def read(self, img, center_x, center_y):
+        # this acturately the upper left corner axis
+        if img.ndim == 2:
+            img = self.matrix2tensor4(img)
+
+        loc_x, loc_y = self.float2center_pixel(center_x, center_y)
+        img_paded = self.padding_img(img)
+        retina, _ = theano.map(self.do_glimpes, sequences=[img_paded, loc_x,
+                                                           loc_y])
+        return retina
+
+    def do_glimpes(self, img, loc_x, loc_y):
+        """
+        a subpatch of an image
+        """
+        patch = img[:, loc_y - self.radius:loc_y + self.radius,
+                    loc_x - self.radius:loc_x + self.radius]
+        glimpe = self.retina(img, loc_x, loc_y)
+        retina = T.concatenate([patch, glimpe], axis=0)
+        return retina
+
+    def filter(self, img, ds):
+        return T.signal.pool.pool_2d(img, ds=ds)
+
+    def do_retina(self, i, img, loc_x, loc_y):
+        stride_x, stride_y = (self.radius * self.retina_strides[0] ** i,
+                              self.radius * self.retina_strides[1] ** i)
+        patch = img[:, loc_y - stride_y:loc_y + stride_y,
+                    loc_x - stride_x:loc_x + stride_x]
+        return self.filter(patch, (self.retina_strides[0] ** i,
+                                   self.retina_strides[1] ** i))
+
+    def retina(self, img, loc_x, loc_y):
+        # we do not use scan for doing retina this is just for sytax sugar
+        # retina, _ = theano.scan(self.do_retina,
+        #                         sequences=[np.arange(1, self.n_retina)],
+        #                         non_sequences=[img, loc_x, loc_y])
+        retina = []
+        for i in range(1, self.n_retina):
+            retina.append(self.do_retina(i, img, loc_x, loc_y))
+        retina = T.concatenate(retina, axis=0)
+        return retina
+
+
 class GlimpseNetwork(Initializable):
     """
     GlimpseSensor & Linear + Rectifier
@@ -371,7 +484,11 @@ class GlimpseNetwork(Initializable):
                                 weights_init=self.weights_init,
                                 biases_init=self.biases_init)
 
-        self.children = [self.glimpes_0, self.glimpes_1]  # self.glimpes_out]
+        self.glimpes_out = Linear(input_dim=dim*2, output_dim=dim,
+                                  name=self.name + '_glimp_out',
+                                  **kwargs)
+
+        self.children = [self.glimpes_0, self.glimpes_1, self.glimpes_out]
         self.output_dim = dim
 
     def get_dim(self, name):
@@ -401,7 +518,8 @@ class GlimpseNetwork(Initializable):
         glimpes = self.sensor.read(img, *l_unpack)
         h0 = T.nnet.relu(self.glimpes_0.apply(l_last))
         h1 = T.nnet.relu(self.glimpes_1.apply(glimpes))
-        hidden_g = T.nnet.relu(h1 + h0)
+        h_c = T.concatenate([h0, h1], axis=1)
+        hidden_g = T.nnet.relu(self.glimpes_out.apply(h_c))
         return hidden_g
 
 
@@ -410,7 +528,7 @@ class LocationNetwork(Initializable, Random):
         super(LocationNetwork, self).__init__(**kwargs)
         # self.linear = Linear()
         self.transform = Linear(
-                input_dim=input_dim,
+                input_dim=input_dim * 2,
                 output_dim=loc_emb,
                 weights_init=self.weights_init,
                 biases_init=self.biases_init)
@@ -464,7 +582,7 @@ class CoreNetwork(BaseRecurrent, Initializable):
 class ActionNetwork(Initializable):
     def __init__(self, input_dim, n_classes, **kwargs):
         super(ActionNetwork, self).__init__(**kwargs)
-        self.transform = Linear(input_dim=input_dim,
+        self.transform = Linear(input_dim=input_dim * 2,
                                 output_dim=n_classes, **kwargs)
         self.out = Softmax()
 
@@ -531,8 +649,9 @@ class RAM(BaseRecurrent, Random, Initializable):
     def apply(self, img, l_last, state, cell):
         hidden_g = self.glimpes_network.apply(img, l_last)
         state, cell = self.core.apply(hidden_g, state, cell, iterate=False)
-        action = self.action_network.apply(state)
-        l = self.location_network.apply(state)
+        h_l = T.concatenate([state, cell], axis=1)
+        action = self.action_network.apply(h_l)
+        l = self.location_network.apply(h_l)
         return l, action, state, cell
 
     @application(outputs=apply.states)

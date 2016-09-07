@@ -4,14 +4,16 @@ import logging
 import sys
 import os
 import time
+import cPickle as pickle
+
 import theano.tensor as T
 
 from fuel.streams import DataStream
 from fuel.schemes import SequentialScheme
 from fuel.transformers import Flatten
 
-from blocks.algorithms import (GradientDescent, CompositeRule, StepClipping,
-                               Adam)
+from blocks.algorithms import (GradientDescent, CompositeRule,
+                               Adam, StepClipping)
 from blocks.bricks.cost import CategoricalCrossEntropy
 from blocks.initialization import Constant, IsotropicGaussian
 from blocks.filter import VariableFilter
@@ -47,6 +49,7 @@ def main():
 
     learning_rate = 1e-3
     name = dataset
+    oldmodel = './exp/mnist-20160906-154631/mnist_model'
 
     inits = {
         'weights_init': IsotropicGaussian(0.01),
@@ -83,7 +86,7 @@ def main():
 
     ram = RAM(core=core, glimpes_network=glim_net,
               location_network=loc_net, action_network=action,
-              n_steps=15, name='RAM', **inits)
+              n_steps=15, name='RAM', random_init_loc=False, **inits)
     ram.initialize()
     # -------------------------------------------------------------
 
@@ -132,8 +135,7 @@ def main():
         parameters=all_params,
         step_rule=CompositeRule([
             StepClipping(10.),
-            Adam(learning_rate),
-        ])
+            Adam(learning_rate)])
     )
     # ------------------------------------------------------------------------
     # Setup monitors
@@ -168,7 +170,7 @@ def main():
         algorithm=algorithm,
         extensions=[
             Timing(),
-            FinishAfter(after_n_epochs=100),
+            FinishAfter(after_n_epochs=500),
             TrainingDataMonitoring(
                 train_monitors,
                 prefix="train",
@@ -188,6 +190,14 @@ def main():
             PartsOnlyCheckpoint("{}/{}".format(subdir, name),
                                 before_training=True, after_epoch=True,
                                 save_separately=['log', 'model'])])
+
+    if oldmodel is not None:
+        print("Initializing parameters with old model %s" % oldmodel)
+        with open(oldmodel, "rb") as f:
+            oldmodel = pickle.load(f)
+            main_loop.model.set_parameter_values(
+                oldmodel.get_parameter_values())
+        del oldmodel
 
     main_loop.run()
 
