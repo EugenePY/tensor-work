@@ -48,6 +48,16 @@ usuage:
 python train-exp.py
 ```
 
+Notes
+----
+
+Randomness for episodes
+====
+1. None Retina sensor(Do not have gobal image information)
+  - Random initialize the location will help the network learn a meaning policy.
+  - Decrease the number of the parameter of the action network first.
+  - design a random scheme if there is no information then output random guess of locations.
+
 
 Reference
 ---
