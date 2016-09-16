@@ -60,7 +60,7 @@ target/
 # dotfiles
 .*
 # experiments
-sandbox/exp/
+sandbox/exp/*
 
-#
-sandbox/datasets/
+# datasets
+sandbox/datasets/*
