@@ -1205,6 +1205,7 @@ def train(dim_word=100,  # word vector dimensionality
             grads = tensor.grad(cost, wrt=itemlist(tparams),
                                 disconnected_inputs='raise',
                                 known_grads={alphas:(baseline_time-opt_outs['masked_cost'].mean(0))[None,:,None]/10.*
+
                                             (-alphas_sample/alphas) + alpha_entropy_c*(tensor.log(alphas) + 1)})
         else:
             grads = tensor.grad(cost, wrt=itemlist(tparams),

@@ -6,6 +6,7 @@ import logging
 import theano
 import theano.tensor as T
 from blocks.model import Model
+from blocks.graph import ComputationGraph
 import numpy as np
 import os
 from skimage.draw import line
@@ -88,7 +89,6 @@ def generate_samples(p, batch, subdir, output_size, channels):
         model = p
     else:
         print("Don't know how to handle unpickled %s" % type(p))
-        return
 
     ram = model.get_top_bricks()[0]
     sensor = ram.glimpes_network.sensor
@@ -96,7 +96,11 @@ def generate_samples(p, batch, subdir, output_size, channels):
     # ------------------------------------------------------------
     logging.info("Compiling sample function...")
     img = T.matrix('img')
-    img_loc, a, _, _ = ram.out(img)
+    img_loc, a, _, _, _ = ram.out(img)
+    img_loc = T.clip(img_loc, -1., 1.)
+
+    img_loc_cg = ComputationGraph([img_loc])
+    updates = img_loc_cg.updates
 
     img_loc, a = img_loc[:-1], a[1:]
 
@@ -112,14 +116,16 @@ def generate_samples(p, batch, subdir, output_size, channels):
 
     img_sampling = sensor.att_mark(img_flat, img_loc_flat[:, 0],
                                    img_loc_flat[:, 1])
+
     do_sample = theano.function([img], outputs=img_sampling,
+                                updates=updates,
                                 allow_input_downcast=True)
 
     # ------------------------------------------------------------
     logging.info("Sampling and saving images...")
     samples = do_sample(batch)
 
-    n_steps_non_symbolic = ram.n_steps - 1  # we have drop one-step
+    n_steps_non_symbolic = ram.n_steps - 1 # we have drop one-step
     img_width = sensor.img_width
     img_height = sensor.img_height
     channels = 3  # RGB imgae
@@ -129,10 +135,10 @@ def generate_samples(p, batch, subdir, output_size, channels):
                                channels, img_height, img_width))
 
     if(n_steps_non_symbolic > 0):
-        img = img_grid(samples[:, n_steps_non_symbolic - 1, :, :])
+        img = img_grid(samples[:, n_steps_non_symbolic-1, :, :])
         img.save("{0}/sample.png".format(subdir))
 
-    for i in xrange(n_steps_non_symbolic-1):
+    for i in xrange(n_steps_non_symbolic):
         img = img_grid(samples[:, i, :, :])
         img.save("{0}/time-{1:03d}.png".format(subdir, i))
 

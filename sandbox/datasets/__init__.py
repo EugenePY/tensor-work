@@ -6,7 +6,22 @@ supported_datasets = ['bmnist', 'silhouettes']
 
 
 def get_data(data_name):
-    if data_name == 'mnist':
+    if data_name == 'mnist_transform':
+        from fuel.datasets import H5PYDataset
+        from fuel.utils import find_in_data_path
+        img_size = (60, 60)
+        channels = 1
+        f_name = find_in_data_path('mnist_transform.hdf5')
+        data_train = H5PYDataset(f_name, which_sets=['train'],
+                                 load_in_memory = True,
+                                 sources=['features', 'targets'])
+        data_valid = H5PYDataset(f_name, which_sets=['valid'],
+                                 load_in_memory = True,
+                                 sources=['features', 'targets'])
+        data_test = H5PYDataset(f_name, which_sets=['test'],
+                                load_in_memory = True,
+                                sources=['features', 'targets'])
+    elif data_name == 'mnist':
         from fuel.datasets import MNIST
         img_size = (28, 28)
         channels = 1
@@ -70,4 +85,23 @@ def get_data(data_name):
 
 
 if __name__ == '__main__':
-    pass
+    import pylab
+    import numpy as np
+
+    img_size, channels, data, _,_ = get_data('mnist_transform')
+    I = np.vstack([data.data_sources[0][0]]*3)
+    height = img_size[0]
+    width = img_size[1]
+
+
+    def imagify(flat_image, h, w):
+        image = flat_image.reshape([3, h, w])
+        image = image.transpose([1, 2, 0])
+        return image / image.max()
+
+    pylab.figure()
+    pylab.gray()
+    pylab.imshow(imagify(I, height, width), interpolation='nearest')
+    pylab.savefig('./transform_mnist.png')
+    pylab.show(block=True)
+

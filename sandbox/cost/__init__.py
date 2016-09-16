@@ -3,7 +3,7 @@ from blocks.bricks.base import application
 from blocks.bricks.cost import CostMatrix
 
 
-class ExpectedLikelihood(CostMatrix):
+class NeLogLikelihood(CostMatrix):
     """Multi-classes Classification:
 
     - log_{Likelihood}
@@ -16,12 +16,15 @@ class ExpectedLikelihood(CostMatrix):
     """
     @application
     def cost_matrix(self, y, y_hat):
-        y_hat_shape = y_hat.shape
-        y = T.repeat(y, y_hat_shape[0], axis=0)
-        y_hat_flat = y_hat.flatten()
-        log_p = -T.log(y_hat_flat[T.arange(y.shape[0]) * y_hat_shape[0] + y] +
-                       1e-5)
-        return log_p.reshape((y.shape[0], 1))
+        n_steps, batch_size, n_classes = y_hat.shape
+        y = T.repeat(y[None, :], n_steps, axis=0).flatten()
+        y_hat_ = y_hat.reshape([n_steps*batch_size, n_classes])
+        return -T.log(y_hat_[T.arange(n_steps*batch_size), y]).reshape(
+            [n_steps, batch_size])
+
+    @application
+    def apply(self, y, y_hat):
+        return self.cost_matrix(y, y_hat).sum(0).mean()
 
 
 class KLdivergence(CostMatrix):
@@ -38,11 +41,13 @@ if __name__ == '__main__':
     n_steps = 9
     test = {y: np.random.randint(n_classes, size=(batch_size,)
                                  ).astype(np.int32),
-            y_hat: np.random.rand(n_steps, batch_size, n_classes
-                                  ).astype('float32')}
-    rval = ExpectedLikelihood().cost_matrix(y, y_hat)
+            y_hat: np.random.uniform(size=(n_steps, batch_size, n_classes)
+                                     ).astype('float32')}
+    rval = NeLogLikelihood().cost_matrix(y, y_hat)
+    print rval.eval(test)
     assert rval.eval(test).shape == (batch_size * n_steps, 1)
     # assert np.allclose(rval.eval(test)
-    rval = ExpectedLikelihood().apply(y, y_hat)
+    rval = NeLogLikelihood().apply(y, y_hat)
     reval = rval.eval(test)
+    print reval
     assert reval.shape == ()  # scalar
