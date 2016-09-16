@@ -4,6 +4,17 @@ Im2Latex
 
 ![Example] (https://raw.githubusercontent.com/EugenePY/tensor-work/master/sandbox/exp/mnist-20160906-185501/sequence.gif)
 
+Glimpes sensor
+==
+- Source image
+![Example] (https://raw.githubusercontent.com/EugenePY/tensor-work/master/sandbox/model/test/cat.jpg)
+- simple glimpes
+![Example] (https://raw.githubusercontent.com/EugenePY/tensor-work/master/sandbox/retina0.png)
+- Retina glimpes
+![Example] (https://raw.githubusercontent.com/EugenePY/tensor-work/master/sandbox/retina1.png)
+![Example] (https://raw.githubusercontent.com/EugenePY/tensor-work/master/sandbox/retina2.png)
+
+
 Project Structure
 --
 - models : RAM
@@ -36,6 +47,16 @@ usuage:
 	
 python train-exp.py
 ```
+
+Notes
+----
+
+Randomness for episodes
+====
+1. None Retina sensor(Do not have gobal image information)
+  - Random initialize the location will help the network learn a meaning policy.
+  - Decrease the number of the parameter of the action network first.
+  - design a random scheme if there is no information then output random guess of locations.
 
 
 Reference
