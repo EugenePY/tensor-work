@@ -2,6 +2,7 @@ Im2Latex
 ==
 - Recurrent Attention Model
 - 96% test acc with simple attention.
+
 ![Example] (https://raw.githubusercontent.com/EugenePY/tensor-work/master/sandbox/exp/mnist-20160917-010151/sequence.gif)
 
 Glimpes sensor
