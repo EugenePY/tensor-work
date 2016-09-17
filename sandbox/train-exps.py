@@ -73,18 +73,18 @@ def main():
 
     # --------------- Building Model ----------------
 
-    glim_net = GlimpseNetwork(dim=100,
+    glim_net = GlimpseNetwork(dim=128,
                               n_channels=channels, img_height=img_height,
                               img_width=img_width, N=7, name='glimpse_net',
                               **inits)  # output (n)
 
-    core = CoreNetwork(input_dim=100, dim=100, name='core_net',
+    core = CoreNetwork(input_dim=128, dim=256, name='core_net',
                        **inits)
 
-    loc_net = LocationNetwork(input_dim=100, loc_emb=2, std=0.18,
+    loc_net = LocationNetwork(input_dim=256, loc_emb=2, std=0.18,
                               non_hetro=False, name='loc_net', **inits)
 
-    action = ActionNetwork(input_dim=100, n_classes=n_classes,
+    action = ActionNetwork(input_dim=256, n_classes=n_classes,
                            name='action', **inits)
 
     ram = RAM(core=core, glimpes_network=glim_net,
