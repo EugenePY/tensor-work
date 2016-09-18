@@ -1,8 +1,9 @@
 Im2Latex
 ==
 - Recurrent Attention Model
+- 96% test acc with simple attention.
 
-![Example] (https://raw.githubusercontent.com/EugenePY/tensor-work/master/sandbox/exp/mnist-20160906-185501/sequence.gif)
+![Example] (https://raw.githubusercontent.com/EugenePY/tensor-work/master/sandbox/exp/mnist-20160917-010151/sequence.gif)
 
 Glimpes sensor
 ==
@@ -18,7 +19,7 @@ Glimpes sensor
 Project Structure
 --
 - models : RAM
-- costs : Expected log Likelihood
+- costs : Expected log Likelihood, REINFORCE
 - training\_algorithms: REINFORCE algorithm
 - utils
 - build : containing pretrain models
