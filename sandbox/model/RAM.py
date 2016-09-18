@@ -4,7 +4,7 @@ import theano.tensor.nnet.neighbours
 import numpy as np
 
 from blocks.bricks.base import application  # , Brick
-from blocks.bricks.simple import Linear, Softmax
+from blocks.bricks.simple import Linear, Softmax, Logistic
 from blocks.bricks.recurrent import recurrent, LSTM, BaseRecurrent
 from blocks.bricks import Random, Initializable
 from blocks.initialization import IsotropicGaussian, Constant
@@ -351,10 +351,11 @@ class RetinaGlimpse(object):
 
     """
     __axis_order = ('b', 'r', 'c', 0, 1)
+    # batch, retina, channel, img_heigh, img_width
 
     def __init__(self, img_width, img_height, channels,
                  n_retina=3, retina_strides=(2, 2), radius=3,
-                 boarder=[[-1., 1], [-1., 1]], include_center=False):
+                 boarder=[[-1., 1.], [-1., 1.]], include_center=False):
 
         self.include_center = include_center
         self.boarder = boarder
@@ -374,7 +375,7 @@ class RetinaGlimpse(object):
 
     def get_dim(self, name):
         if name == 'glimpse':
-            return (self.radius * 2) ** 2 * self.n_retina
+            return (self.radius * 2) ** 2 * self.n_retina * self.channels
         else:
             raise ValueError
 
@@ -542,24 +543,20 @@ class GlimpseNetwork(Initializable):
     """
     def __init__(self, dim,
                  n_channels, img_height, img_width, N, sensor=None,
+                 n_retina=3, radius=4,
                  activations=None, **kwargs):
 
         super(GlimpseNetwork, self).__init__(**kwargs)
-        # self.sensor = GlimpseSensor(channels=n_channels,
-        #                             img_height=img_height,
-        #                             img_width=img_width, N=N)
-        if sensor is None:
+        if sensor is None or sensor == 'simple':
             self.sensor = GlimpseSensorBeta(channels=n_channels,
                                             img_height=img_height,
                                             img_width=img_width, N=N)
-            #self.sensor = RetinaGlimpse(img_width, img_height, n_channels,
-            #                            n_retina=3, radius=4)
+        elif sensor == 'retina':
+            self.sensor = RetinaGlimpse(img_width, img_height, n_channels,
+                                        n_retina=n_retina, radius=radius)
         else:
-            if hasattr(sensor, 'read'):
-                raise ValueError('sensor argument required have read method. '
-                                 'Object' + str(type(sensor)) +
-                                 ' do not have read method')
-            self.sensor = sensor
+            raise ValueError("sensor mode support [simple]|[retina]." +
+                             'Got ' + sensor + '.')
 
         self.loc_emb = self.sensor.emb_dim
 
@@ -692,11 +689,14 @@ class CoreNetwork(BaseRecurrent, Initializable):
 
 
 class ActionNetwork(Initializable):
-    def __init__(self, input_dim, n_classes, **kwargs):
+    def __init__(self, input_dim, n_classes, multi_object=False, **kwargs):
         super(ActionNetwork, self).__init__(**kwargs)
         self.transform = Linear(input_dim=input_dim,
                                 output_dim=n_classes, **kwargs)
-        self.out = Softmax()
+        if multi_object:
+            self.out = Logistic()
+        else:
+            self.out = Softmax()
 
         self.children = [self.transform, self.out]
 
@@ -720,20 +720,20 @@ class RAM(BaseRecurrent, Random, Initializable):
     core : core type layer
     step_output : which space to output
     """
-    def __init__(self, core, glimpes_network, location_network,
+    def __init__(self, core, glimpse_network, location_network,
                  action_network, n_steps, task_env='statics',
                  random_init_loc=True, **kwargs):
 
         super(RAM, self).__init__(**kwargs)
         self.core = core  # projec to hidden state
-        self.glimpes_network = glimpes_network  # sensor information
+        self.glimpse_network = glimpse_network  # sensor information
         self.action_network = action_network  # action network
         self.location_network = location_network
         self.n_steps = n_steps + 1
         self.random_init_loc = random_init_loc
         self.task_env = task_env
 
-        self.children = [self.glimpes_network, self.core,
+        self.children = [self.glimpse_network, self.core,
                          self.location_network,
                          self.action_network]
 
@@ -745,9 +745,9 @@ class RAM(BaseRecurrent, Random, Initializable):
 
     def get_dim(self, name):
         if name in 'img':
-            return self.glimpes_network.get_dim('img')
+            return self.glimpse_network.get_dim('img')
         elif name == 'l_last':
-            return self.glimpes_network.loc_emb
+            return self.glimpse_network.loc_emb
         elif name == 'action':
             return self.action_network.output_dim
         elif name == 'state':
@@ -761,7 +761,7 @@ class RAM(BaseRecurrent, Random, Initializable):
                contexts=['img'], states=['l_last', 'state', 'cell'],
                outputs=['l_last', 'action', 'state', 'cell', 'l_sample'])
     def apply(self, img, l_last, state, cell):
-        hidden_g = self.glimpes_network.apply(img, l_last)
+        hidden_g = self.glimpse_network.apply(img, l_last)
         state, cell = self.core.apply(hidden_g, state, cell, iterate=False)
         action = self.action_network.apply(state)
         l, l_sample = self.location_network.apply(state)
@@ -795,11 +795,11 @@ class RAM(BaseRecurrent, Random, Initializable):
                contexts=['img'], states=['l_last', 'state', 'cell'],
                outputs=['l_last', 'action', 'state', 'cell', 'img_loc'])
     def detail_sample(self, img, l_last, state, cell):
-        hidden_g = self.glimpes_network.apply(img, l_last)
+        hidden_g = self.glimpse_network.apply(img, l_last)
         state, cell = self.core.apply(hidden_g, state, cell, iterate=False)
         action = self.action_network.apply(state)
         l = self.location_network.apply(state)
-        sensor = self.glimpes_network.sensor
+        sensor = self.glimpse_network.sensor
 
         loc = sensor.nn2att(l)
         W = sensor.read(img, *loc)

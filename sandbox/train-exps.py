@@ -101,7 +101,9 @@ def main():
 
     loc_sample = loc_sample[:-1]
     loc_u = loc_u[:-1]
-    actions = T.repeat(actions[1:][-1][None, :, :], 8, axis=0)
+
+    # classification task
+    actions = T.repeat(actions[1:][-1][None, :, :], loc_sample.shape[0], axis=0)
     # get loc network param
     # ---------------- Building Reinforce alforithm ----------------
     loc_bricks = list(loc_net.children)  # + list(glim_net.children)

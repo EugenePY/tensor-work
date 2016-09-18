@@ -78,6 +78,7 @@ do_read = theano.function(inputs=[img, center_x, center_y],
 
 # ------------------------------------------------------------------------
 I = Image.open("model/test/cat.jpg")
+
 I = I.resize((640, 480))  # .convert('L')
 I = np.asarray(I).transpose([2, 0, 1])
 

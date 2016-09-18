@@ -1,0 +1,59 @@
+{
+        "dataset": "mnist", 
+        "img_width": &img_width 28,
+        "img_heigh": &img_height 28,
+        "loc_std": &loc_std 0.12,
+        "n_steps": &n_steps 8,
+
+        "weigths_init": &weight_init !obj:blocks.initialization.IsotropicGaussian 
+                                        {"std": 0.1}, 
+        "biases_init": &biases_init !obj:blocks.initialization.Constant 
+                                        {"constant": 0.},
+
+        "glimpse_net": &glimpse_net !obj:model.RAM.GlimpseNetwork {
+                "dim": 100,
+                "n_channels": 1,
+                "img_height": *img_height,
+                "img_width": *img_width,
+                "N": 7,
+                "name": 'glimse_net',
+                "weights_init": *weight_init,
+                "biases_init": *biases_init},
+
+        "location_network": &loc_net !obj:model.RAM.LocationNetwork {
+                "input_dim": 100,
+                "std": *loc_std,
+                "loc_emb": 2,
+                "name": 'loc_net',
+                "weights_init": *weight_init,
+                "biases_init": *biases_init
+        },
+        
+        "core_network": &core_net !obj:model.RAM.CoreNetwork {
+                "input_dim": 100,
+                "dim": 100,
+                "name": 'core_net',
+                "weights_init": *weight_init,
+                "biases_init": *biases_init
+        },
+
+        "action_net": &act_net !obj:model.RAM.ActionNetwork {
+                "input_dim": 100,
+                "n_classes": 10,
+                "name": 'act_net',
+                "weights_init": *weight_init,
+                "biases_init": *biases_init
+        },
+
+        "RAM": &RAM !obj:model.RAM.RAM {
+                "glimpse_network": *glimpse_net,
+                "core": *core_net,
+                "action_network": *act_net,
+                "location_network": *loc_net,
+                "name": 'RAM',
+                "n_steps": *n_steps,
+                "weights_init": *weight_init,
+                "biases_init": *biases_init
+        }
+
+}
