@@ -3,17 +3,17 @@ Im2Latex
 - Recurrent Attention Model
 - 96% test acc with simple attention.
 
-![Example] (https://raw.githubusercontent.com/EugenePY/tensor-work/master/sandbox/exp/mnist-20160917-010151/sequence.gif)
+![Example](https://raw.githubusercontent.com/EugenePY/tensor-work/master/sandbox/exp/mnist-20160917-010151/sequence.gif)
 
 Glimpes sensor
 ==
 - Source image
-![Example] (https://raw.githubusercontent.com/EugenePY/tensor-work/master/sandbox/model/test/cat.jpg)
+![Example](https://raw.githubusercontent.com/EugenePY/tensor-work/master/sandbox/model/test/cat.jpg)
 - simple glimpes
-![Example] (https://raw.githubusercontent.com/EugenePY/tensor-work/master/sandbox/retina0.png)
+![Example](https://raw.githubusercontent.com/EugenePY/tensor-work/master/sandbox/retina0.png)
 - Retina glimpes
-![Example] (https://raw.githubusercontent.com/EugenePY/tensor-work/master/sandbox/retina1.png)
-![Example] (https://raw.githubusercontent.com/EugenePY/tensor-work/master/sandbox/retina2.png)
+![Example](https://raw.githubusercontent.com/EugenePY/tensor-work/master/sandbox/retina1.png)
+![Example](https://raw.githubusercontent.com/EugenePY/tensor-work/master/sandbox/retina2.png)
 
 
 Project Structure
